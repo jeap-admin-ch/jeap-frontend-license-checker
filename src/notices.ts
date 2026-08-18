@@ -154,6 +154,21 @@ function fence(content: string): string {
   return `${marker}text\n${content.replace(/\n+$/, '')}\n${marker}`;
 }
 
+/**
+ * Renders a copied license text as a Markdown link to the file in the repository. The path
+ * doubles as the link text so that the notice file still names it when it is read unrendered.
+ *
+ * Only the characters that would break the link are escaped: a package may ship a file whose
+ * name contains a space or a parenthesis, which would otherwise end the link target early.
+ */
+function textLink(relativePath: string): string {
+  const target = relativePath
+    .replace(/ /g, '%20')
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29');
+  return `[${relativePath}](${target})`;
+}
+
 /** Collects the keys of the packages that are actually redistributed. */
 function redistributedKeys(
   config: ResolvedConfig,
@@ -247,7 +262,7 @@ export function renderNotices(config: ResolvedConfig): NoticeOutput {
       for (const document of documents) {
         const relativePath = `${config.notices.textsDir}/${directory}/${document.fileName}`;
         files.push({ relativePath, content: document.content });
-        lines.push(`    - ${document.kind} text: ${relativePath}`);
+        lines.push(`    - ${document.kind} text: ${textLink(relativePath)}`);
       }
       continue;
     }
