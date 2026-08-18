@@ -34,6 +34,7 @@ publiccode.yml                            publiccode.yml metadata (jEAP OSS dist
 docs/
   getting-started.md                      Adding the checker to a project
   configuration.md                        Every configuration setting
+  notices.md                              The notice file and the license texts
   policy.md                               How a package is judged; the built-in policy
   migration.md                            Replacing the previous license checker
   development.md                          Local development, scripts and CI
@@ -89,6 +90,12 @@ runs `npm run format:check` followed by `npm run lint` and fails the build on an
 
 ## Behaviour rules
 
+- The notice file carries the full license texts of the **production** dependencies, copied
+  byte for byte, including NOTICE files. MIT, BSD and Apache-2.0 require the notice to travel
+  with the code, so a link is not enough. Never reformat, deduplicate or synthesise a text: a
+  package that ships none is marked, not invented for.
+- The committed notice file must stay quiet. It carries no versions and no absolute paths, so
+  it changes only when a dependency or a license changes, not on every update.
 - Never let a package pass silently. A package that is not covered by the policy is either an
   explicit exception with a reason, or a problem.
 - A dual licensed package is accepted through a permissive alternative, but must stay visible in

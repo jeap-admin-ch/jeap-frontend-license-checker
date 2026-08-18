@@ -12,6 +12,7 @@ import { check } from './check';
 import { resolveConfig, type ConfigOverrides } from './config';
 import { renderNotices } from './notices';
 import { renderJson, renderText } from './report';
+import type { LicenseTextsMode } from './types';
 
 const USAGE = `Usage: jeap-frontend-license-checker [command] [options]
 
@@ -26,6 +27,12 @@ Options:
   --exclude-private         Skip packages marked as private
   --allow-unused-exceptions Do not fail on configured exceptions that are no longer needed
   --out <file>              Write the output to a file instead of stdout (notices)
+  --texts <mode>            License texts of the redistributed dependencies (notices):
+                            folder (default), inline or none
+  --texts-dir <dir>         Directory for the copied license texts, relative to the
+                            notice file (default: third-party-licenses)
+  --include-versions        Name the dependencies with their version (notices). Off by
+                            default so a dependency update does not rewrite the file
   --json                    Print the check result as JSON
   --quiet                   Print nothing on success
   -h, --help                Show this help
@@ -91,6 +98,21 @@ function parseArguments(argv: string[]): ParsedArguments {
       case '--out':
         parsed.overrides.noticesOut = requireValue('--out', argv[++index]);
         break;
+      case '--texts':
+        parsed.overrides.noticesTexts = requireValue(
+          '--texts',
+          argv[++index]
+        ) as LicenseTextsMode;
+        break;
+      case '--include-versions':
+        parsed.overrides.noticesIncludeVersions = true;
+        break;
+      case '--texts-dir':
+        parsed.overrides.noticesTextsDir = requireValue(
+          '--texts-dir',
+          argv[++index]
+        );
+        break;
       case '--production':
         parsed.overrides.production = true;
         break;
@@ -139,20 +161,75 @@ function runCheck(parsed: ParsedArguments): number {
   return result.ok ? 0 : 1;
 }
 
+/**
+ * Resolves the directory the license texts are written to. It has to stay below the
+ * directory of the notice file, because that directory is rebuilt on every run and a path
+ * escaping it would delete something the tool does not own.
+ */
+function resolveTextsDirectory(
+  noticeDirectory: string,
+  textsDir: string
+): string {
+  const resolved = path.resolve(noticeDirectory, textsDir);
+  const relative = path.relative(noticeDirectory, resolved);
+  if (
+    textsDir.trim() === '' ||
+    relative === '' ||
+    relative.startsWith('..') ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(
+      `The license texts directory "${textsDir}" must be a directory below the notice file`
+    );
+  }
+  return resolved;
+}
+
 function runNotices(parsed: ParsedArguments): number {
   const config = resolveConfig(parsed.overrides);
-  const notices = renderNotices(config);
+  const output = renderNotices(config);
 
   if (config.notices.out === undefined) {
-    process.stdout.write(notices);
+    if (output.files.length > 0) {
+      process.stderr.write(
+        'The folder layout writes the license texts next to the notice file, so it needs --out.\n' +
+          'Use --texts inline to get a single self-contained file on stdout.\n'
+      );
+      return 2;
+    }
+    process.stdout.write(output.markdown);
     return 0;
   }
 
   const outputPath = path.resolve(config.start, config.notices.out);
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, notices, 'utf8');
+  const noticeDirectory = path.dirname(outputPath);
+  fs.mkdirSync(noticeDirectory, { recursive: true });
+
+  if (config.notices.texts === 'folder') {
+    // The directory is rebuilt from scratch, so that texts of dependencies that are gone do
+    // not linger next to the ones that are current.
+    const textsDirectory = resolveTextsDirectory(
+      noticeDirectory,
+      config.notices.textsDir
+    );
+    fs.rmSync(textsDirectory, { recursive: true, force: true });
+
+    for (const file of output.files) {
+      const filePath = path.resolve(noticeDirectory, file.relativePath);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, file.content);
+    }
+  }
+
+  fs.writeFileSync(outputPath, output.markdown, 'utf8');
   if (!parsed.quiet) {
-    process.stdout.write(`Wrote third-party notices to ${outputPath}\n`);
+    const written =
+      output.files.length > 0
+        ? ` and ${output.files.length} license texts to ${config.notices.textsDir}`
+        : '';
+    process.stdout.write(
+      `Wrote third-party notices to ${outputPath}${written}\n`
+    );
   }
   return 0;
 }

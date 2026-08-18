@@ -12,7 +12,12 @@
     "legacy-array": "1.0.0",
     "no-metadata": "1.0.0",
     "nested-host": "1.0.0",
-    "public-domain-claim": "0.0.1"
+    "public-domain-claim": "0.0.1",
+    "lowercase-license": "1.0.0",
+    "uppercase-license-md": "2.0.0",
+    "notice-shipping": "3.0.0",
+    "fenced-license": "4.0.0",
+    "data-file-decoy": "5.0.0"
   },
   "devDependencies": {
     "dev-only": "1.0.0"

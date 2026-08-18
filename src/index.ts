@@ -14,11 +14,14 @@ export {
 } from './default-policy';
 export {
   detectLicense,
+  findLicenseDocuments,
   licenseFromLicenseFile,
   licenseFromManifest,
 } from './license-detection';
+export type { LicenseDocument } from './license-detection';
 export { findMatchingExceptionKey, splitPackageKey } from './match';
 export { NOTICE_FIELDS, renderNotices } from './notices';
+export type { NoticeFile, NoticeOutput } from './notices';
 export { renderJson, renderText } from './report';
 export { scanPackages } from './scan';
 export type { ScanOptions } from './scan';
@@ -29,6 +32,7 @@ export type {
   CheckedPackage,
   LicenseException,
   LicenseSource,
+  LicenseTextsMode,
   NoticesConfig,
   ResolvedConfig,
   ScannedPackage,

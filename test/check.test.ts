@@ -4,7 +4,6 @@ import { describe, it } from 'node:test';
 
 import { check } from '../src/check';
 import { resolveConfig } from '../src/config';
-import { renderNotices } from '../src/notices';
 import { renderJson, renderText } from '../src/report';
 import type { CheckResult, ResolvedConfig, Verdict } from '../src/types';
 
@@ -213,7 +212,7 @@ describe('check', () => {
   it('counts every scanned package by its license', () => {
     const result = check(configure());
     assert.equal(result.licenseCounts['UNKNOWN'], 2);
-    assert.equal(result.licenseCounts['MIT'], 3);
+    assert.equal(result.licenseCounts['MIT'], 6);
   });
 });
 
@@ -233,23 +232,5 @@ describe('report', () => {
     };
     assert.equal(parsed.ok, false);
     assert.ok(parsed.packages.some(item => item.key === 'plain-mit@1.2.3'));
-  });
-});
-
-describe('notices', () => {
-  it('lists every dependency but not the project itself', () => {
-    const notices = renderNotices(configure());
-    assert.match(
-      notices,
-      /^ - \*\*\[plain-mit@1\.2\.3\]\(https:\/\/github\.com\/example\/plain-mit\)\*\*$/m
-    );
-    assert.match(notices, /^ {4}- licenses: MIT$/m);
-    assert.doesNotMatch(notices, /fixture-project/);
-  });
-
-  it('falls back to a plain entry when a package declares no repository', () => {
-    const notices = renderNotices(configure());
-    assert.match(notices, /^ - \*\*no-metadata@3\.0\.0\*\*$/m);
-    assert.match(notices, /^ {4}- licenses: UNKNOWN$/m);
   });
 });

@@ -12,7 +12,12 @@ import {
   JEAP_DENIED_LICENSES,
   JEAP_RECOMMENDED_LICENSES,
 } from './default-policy';
-import type { LicenseException, NoticesConfig, ResolvedConfig } from './types';
+import type {
+  LicenseException,
+  LicenseTextsMode,
+  NoticesConfig,
+  ResolvedConfig,
+} from './types';
 
 /** The configuration file format. */
 export interface FileConfig {
@@ -30,6 +35,9 @@ export interface FileConfig {
     fields?: string[];
     production?: boolean;
     excludePrivatePackages?: boolean;
+    texts?: LicenseTextsMode;
+    textsDir?: string;
+    includeVersions?: boolean;
   };
 }
 
@@ -41,12 +49,19 @@ export interface ConfigOverrides {
   excludePrivatePackages?: boolean;
   failOnUnusedExceptions?: boolean;
   noticesOut?: string;
+  noticesTexts?: LicenseTextsMode;
+  noticesTextsDir?: string;
+  noticesIncludeVersions?: boolean;
 }
 
 export const CONFIG_FILE_NAME = 'jeap-license-check.json';
 export const PACKAGE_JSON_CONFIG_KEY = 'jeapLicenseCheck';
 
-const DEFAULT_NOTICE_FIELDS = ['name', 'version', 'licenses', 'repository'];
+// The version is deliberately not a default field: it would make every dependency update
+// rewrite the committed notice file without changing what is being attributed.
+const DEFAULT_NOTICE_FIELDS = ['name', 'licenses', 'repository'];
+const DEFAULT_TEXTS_DIR = 'third-party-licenses';
+const TEXTS_MODES: LicenseTextsMode[] = ['folder', 'inline', 'none'];
 
 function parseJsonFile(filePath: string): unknown {
   let content: string;
@@ -131,6 +146,20 @@ function normalizeExceptions(
   return normalized;
 }
 
+function resolveTextsMode(
+  mode: LicenseTextsMode | undefined
+): LicenseTextsMode {
+  if (mode === undefined) {
+    return 'folder';
+  }
+  if (!TEXTS_MODES.includes(mode)) {
+    throw new Error(
+      `Unknown license texts mode "${mode}", expected one of ${TEXTS_MODES.join(', ')}`
+    );
+  }
+  return mode;
+}
+
 function resolveNotices(
   config: FileConfig,
   overrides: ConfigOverrides
@@ -139,9 +168,20 @@ function resolveNotices(
   return {
     out: overrides.noticesOut ?? notices.out,
     fields: notices.fields ?? DEFAULT_NOTICE_FIELDS,
-    production: notices.production ?? config.production ?? false,
+    // The notice specific setting is the most specific one and wins; below it the command
+    // line flag beats the project wide setting from the configuration file.
+    production:
+      notices.production ?? overrides.production ?? config.production ?? false,
     excludePrivatePackages:
-      notices.excludePrivatePackages ?? config.excludePrivatePackages ?? false,
+      notices.excludePrivatePackages ??
+      overrides.excludePrivatePackages ??
+      config.excludePrivatePackages ??
+      false,
+    texts: resolveTextsMode(overrides.noticesTexts ?? notices.texts),
+    textsDir:
+      overrides.noticesTextsDir ?? notices.textsDir ?? DEFAULT_TEXTS_DIR,
+    includeVersions:
+      overrides.noticesIncludeVersions ?? notices.includeVersions ?? false,
   };
 }
 
