@@ -1,6 +1,6 @@
 {
   "name": "@jeap/jeap-frontend-license-checker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "License policy checker and third-party notice generator for jEAP frontend projects.",
   "keywords": [
     "license",
@@ -28,8 +28,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "jeap-frontend-license-checker": "./dist/cli.js",
-    "jeap-license-check": "./dist/cli.js"
+    "jeap-frontend-license-checker": "dist/cli.js",
+    "jeap-license-check": "dist/cli.js"
   },
   "files": [
     "dist",

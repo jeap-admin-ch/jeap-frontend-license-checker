@@ -138,7 +138,7 @@ describe('renderNotices, license texts in a folder', () => {
     );
     assert.match(
       output.markdown,
-      /^ {4}- notice text: third-party-licenses\/notice-shipping\/NOTICE$/m
+      /^ {4}- notice text: \[third-party-licenses\/notice-shipping\/NOTICE\]\(third-party-licenses\/notice-shipping\/NOTICE\)$/m
     );
   });
 
@@ -185,6 +185,66 @@ describe('renderNotices, license texts in a folder', () => {
       output.files.some(file => file.relativePath.includes('plain-mit')),
       'a production dependency must contribute its license text'
     );
+  });
+});
+
+describe('the copied texts are linked from the notice file', () => {
+  /** The file is committed next to the notices, so the path can be a link to it. */
+  it('renders the path as a Markdown link to the file in the repository', () => {
+    const { markdown } = renderNotices(configure({ texts: 'folder' }));
+    assert.match(
+      markdown,
+      /^ {4}- license text: \[third-party-licenses\/plain-mit\/LICENSE\]\(third-party-licenses\/plain-mit\/LICENSE\)$/m
+    );
+  });
+
+  /** The path doubles as the link text, so an unrendered read still names the file. */
+  it('keeps the path readable as the link text', () => {
+    const { markdown, files } = renderNotices(configure({ texts: 'folder' }));
+    for (const file of files) {
+      assert.ok(
+        markdown.includes(`[${file.relativePath}](`),
+        `${file.relativePath} is not named as the link text`
+      );
+    }
+  });
+
+  it('escapes characters that would end the link target early', () => {
+    const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'jeap-link-'));
+    fs.mkdirSync(path.join(projectPath, 'node_modules', 'spacey'), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(projectPath, 'package.json'),
+      JSON.stringify({
+        name: 'host',
+        version: '1.0.0',
+        license: 'MIT',
+        dependencies: { spacey: '1.0.0' },
+      })
+    );
+    const packagePath = path.join(projectPath, 'node_modules', 'spacey');
+    fs.writeFileSync(
+      path.join(packagePath, 'package.json'),
+      JSON.stringify({ name: 'spacey', version: '1.0.0', license: 'MIT' })
+    );
+    fs.writeFileSync(path.join(packagePath, 'LICENSE (MIT).txt'), 'MIT text');
+
+    try {
+      const { markdown } = renderNotices(
+        resolveConfig({ start: projectPath, production: true })
+      );
+      assert.match(
+        markdown,
+        /\[third-party-licenses\/spacey\/LICENSE \(MIT\)\.txt\]/
+      );
+      assert.match(
+        markdown,
+        /\(third-party-licenses\/spacey\/LICENSE%20%28MIT%29\.txt\)/
+      );
+    } finally {
+      fs.rmSync(projectPath, { recursive: true, force: true });
+    }
   });
 });
 
