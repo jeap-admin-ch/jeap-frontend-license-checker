@@ -1,0 +1,19 @@
+{
+  "name": "fixture-project",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "dependencies": {
+    "@scope/widget": "1.0.0",
+    "plain-mit": "1.0.0",
+    "dual-copyleft": "1.0.0",
+    "and-licensed": "1.0.0",
+    "license-file-only": "1.0.0",
+    "legacy-array": "1.0.0",
+    "no-metadata": "1.0.0",
+    "nested-host": "1.0.0"
+  },
+  "devDependencies": {
+    "dev-only": "1.0.0"
+  }
+}

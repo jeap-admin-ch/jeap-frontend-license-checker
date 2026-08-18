@@ -1,0 +1,53 @@
+publiccodeYmlVersion: 0.5.0
+name: jeap-frontend-license-checker
+applicationSuite: jEAP
+softwareVersion: 1.0.0
+releaseDate: 2026-08-18
+url: "https://github.com/jeap-admin-ch/jeap-frontend-license-checker.git"
+landingURL: "https://github.com/jeap-admin-ch/jeap"
+platforms:
+  - web
+categories:
+  - application-development
+developmentStatus: stable
+softwareType: library
+organisation:
+  uri: https://ld.admin.ch/office/V.1.7
+  name: Federal Office of Information Technology, Systems and Telecommunication
+description:
+  en:
+    localisedName: jeap-frontend-license-checker
+    shortDescription: License policy checker and third-party notice generator for jEAP frontend projects.
+    longDescription: >
+      jeap-frontend-license-checker is a command line tool that checks the licenses of the
+      installed npm dependencies of a frontend project against a license policy, and generates
+      the third-party notice file listing those dependencies. The accepted permissive licenses
+      ship with the tool, so a project without configuration is already checked against the jEAP
+      policy and only declares the exceptions it actually needs. License information is read from
+      the package manifests, falling back to recognising well-known license texts in a package's
+      license file. SPDX license expressions are evaluated, and a dual licensed package is
+      accepted through its permissive alternative while the decision stays visible in the report.
+      Exception keys support version and scope wildcards for scoped packages, so a dependency
+      update of an exempted package does not break the build. The tool has no runtime
+      dependencies.
+    features:
+      - License policy check of all installed npm dependencies of a project
+      - Built-in policy of accepted permissive licenses, extendable and restrictable per project
+      - SPDX license expression evaluation with AND, OR, WITH and parentheses
+      - Dual licensed packages accepted through a permissive alternative and reported separately
+      - Exception keys with version and scope wildcards, including scoped packages
+      - Detection of exceptions that are no longer needed
+      - License detection from package manifests and from license files
+      - Third-party notice file generation in Markdown
+      - Text and JSON reports with distinct exit codes for continuous integration
+legal:
+  license: Apache-2.0
+maintenance:
+  type: internal
+  contacts:
+    - name: Federal Office of Information Technology, Systems and Telecommunication FOITT
+      email: jeap-community@bit.admin.ch
+localisation:
+  localisationReady: false
+  availableLanguages:
+    - en

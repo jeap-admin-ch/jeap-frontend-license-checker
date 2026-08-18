@@ -1,0 +1,64 @@
+{
+  "name": "@jeap/jeap-frontend-license-checker",
+  "version": "1.0.0",
+  "description": "License policy checker and third-party notice generator for jEAP frontend projects.",
+  "keywords": [
+    "license",
+    "license-checker",
+    "spdx",
+    "compliance",
+    "npm",
+    "cli",
+    "jeap"
+  ],
+  "author": "Federal Office of Information Technology, Systems and Telecommunication FOITT",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/jeap-admin-ch/jeap-frontend-license-checker#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeap-admin-ch/jeap-frontend-license-checker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jeap-admin-ch/jeap-frontend-license-checker/issues"
+  },
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "jeap-frontend-license-checker": "./dist/cli.js",
+    "jeap-license-check": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD-PARTY-LICENSES.md"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build:test && node --test .test-build/test/*.test.js",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"*.md\" \"docs/**/*.md\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"*.md\" \"docs/**/*.md\"",
+    "notices": "node dist/cli.js notices --out THIRD-PARTY-LICENSES.md",
+    "prepack": "npm run build",
+    "pack:dry-run": "npm pack --dry-run",
+    "publish:dry-run": "npm publish --dry-run --access public"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "eslint": "^10.5.0",
+    "prettier": "^3.8.4",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "^8.62.0"
+  }
+}
