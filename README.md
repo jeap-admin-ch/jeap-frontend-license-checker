@@ -91,6 +91,7 @@ evaluates SPDX expressions instead of requiring an exception per dual licensed p
 | Topic                                                          | Description                                                    |
 | -------------------------------------------------------------- | -------------------------------------------------------------- |
 | [Getting started](docs/getting-started.md)                     | Adding the checker to a project                                |
+| [Notices](docs/notices.md)                                     | The third-party notice file and the license texts              |
 | [Configuration](docs/configuration.md)                         | Every configuration setting                                    |
 | [Policy](docs/policy.md)                                       | The licenses the built-in policy accepts, and how to change it |
 | [Migration](docs/migration.md)                                 | Replacing the previous license checker                         |

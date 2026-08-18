@@ -27,4 +27,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   file a `SEE LICENSE IN <file>` declaration points to.
 - Exceptions that no longer match an installed package are reported and fail the check by
   default, so exception lists do not accumulate stale entries.
+- The notice file carries the full license texts of the production dependencies, together with
+  any NOTICE file, copied byte for byte. MIT, BSD and Apache-2.0 require the notice to be
+  included in what is redistributed, and a frontend bundle contains the dependency code.
+  `notices.texts` selects the layout: `folder` (default) keeps the notice file an index beside
+  a `third-party-licenses/` directory, `inline` produces one self-contained file, `none` lists
+  the identifiers only. Texts are never synthesised: a package that ships none is marked.
+- License and notice files are found case insensitively, so a package shipping a lower case
+  `license` file is no longer reported as having no license.
+- The notice file names dependencies without their version by default, and the copied texts are
+  named after the package, so a committed notice file does not change on a dependency update.
 - No runtime dependencies.

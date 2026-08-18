@@ -21,9 +21,12 @@ setting is optional.
   "allowDualLicenseChoice": true,
   "notices": {
     "out": "../THIRD-PARTY-FRONTEND-LICENSES.md",
-    "fields": ["name", "version", "licenses", "repository"],
+    "fields": ["name", "licenses", "repository"],
     "production": true,
-    "excludePrivatePackages": true
+    "excludePrivatePackages": true,
+    "texts": "folder",
+    "textsDir": "third-party-licenses",
+    "includeVersions": false
   }
 }
 ```
@@ -77,11 +80,35 @@ list does not accumulate entries for dependencies that are long gone. Set
 
 ## Notice file
 
-| Setting                          | Default                                         | Description                                                                                                                  |
-| -------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `notices.out`                    | none (stdout)                                   | File to write, relative to the project directory. `--out` overrides it.                                                      |
-| `notices.fields`                 | `["name", "version", "licenses", "repository"]` | Fields listed per dependency. Available: `name`, `version`, `licenses`, `license`, `repository`, `publisher`, `url`, `path`. |
-| `notices.production`             | value of `production`                           | Only list production dependencies.                                                                                           |
-| `notices.excludePrivatePackages` | value of `excludePrivatePackages`               | Skip private packages.                                                                                                       |
+| Setting                          | Default                                                     | Description                                                                                                                  |
+| -------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `notices.out`                    | none (stdout)                                               | File to write, relative to the project directory. `--out` overrides it.                                                      |
+| `notices.fields`                 | `["name", "licenses", "repository"]`                        | Fields listed per dependency. Available: `name`, `version`, `licenses`, `license`, `repository`, `publisher`, `url`, `path`. |
+| `notices.production`             | the `--production` flag, else `production`                  | Only list production dependencies.                                                                                           |
+| `notices.excludePrivatePackages` | the `--exclude-private` flag, else `excludePrivatePackages` | Skip private packages.                                                                                                       |
+| `notices.texts`                  | `"folder"`                                                  | Where the full license texts go: `"folder"`, `"inline"` or `"none"`. See [notices.md](notices.md).                           |
+| `notices.textsDir`               | `"third-party-licenses"`                                    | Directory for the copied texts, relative to the notice file. Must stay below it.                                             |
+| `notices.includeVersions`        | `false`                                                     | Name the dependencies with their version.                                                                                    |
 
 The project itself is never listed; it is not a third-party dependency.
+
+The license **texts** always cover the production dependency graph, whatever the index covers:
+development tooling is not redistributed and carries no attribution obligation.
+
+## Keeping the notice file quiet
+
+The notice file is committed, so every line that changes for a reason other than a changed
+license produces a commit that says nothing. Two defaults exist for that:
+
+- **Versions are left out.** A notice file attributes copyright holders; it is not an
+  inventory. With versions in it, every dependency bump rewrites it. Set
+  `notices.includeVersions` to `true`, or pass `--include-versions`, if you want them anyway.
+- **The copied texts are named after the package, not the release.** A path such as
+  `third-party-licenses/@angular__core/LICENSE` only changes when the package's own license
+  text changes.
+
+What remains are the changes worth reviewing: a dependency appears or disappears, or its
+license changes.
+
+The `path` field is available but writes absolute paths of the machine that generated the
+file. Leave it out of a committed artifact.

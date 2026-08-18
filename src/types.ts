@@ -55,12 +55,30 @@ export interface ResolvedConfig {
   notices: NoticesConfig;
 }
 
+/**
+ * How the full license texts are delivered next to the notice file.
+ *
+ * `folder` keeps the notice file a readable index and copies the original license and notice
+ * files of every dependency into a directory beside it. `inline` produces a single
+ * self-contained file. `none` lists the license identifiers only.
+ */
+export type LicenseTextsMode = 'folder' | 'inline' | 'none';
+
 /** Settings of the third-party notice file generation. */
 export interface NoticesConfig {
   out: string | undefined;
   fields: string[];
   production: boolean;
   excludePrivatePackages: boolean;
+  texts: LicenseTextsMode;
+  /** Directory for the copied license texts, relative to the notice file. */
+  textsDir: string;
+  /**
+   * Name the dependencies with their version. Off by default: a notice file is an
+   * attribution document, not an inventory, and versions make every dependency update
+   * rewrite it.
+   */
+  includeVersions: boolean;
 }
 
 /** How a single package was judged against the policy. */

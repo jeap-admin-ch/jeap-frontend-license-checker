@@ -87,19 +87,79 @@ export function licenseFromManifest(
   return `(${normalized.join(' OR ')})`;
 }
 
-const LICENSE_FILE_NAMES = [
-  'LICENSE',
-  'LICENSE.md',
-  'LICENSE.txt',
-  'LICENCE',
-  'LICENCE.md',
-  'LICENCE.txt',
-  'LICENSE-MIT',
-  'COPYING',
-  'COPYING.md',
-  'COPYING.txt',
+/**
+ * File name extensions that never hold a license text, so that data files such as
+ * `license-exceptions.json` are not mistaken for one.
+ */
+const NON_TEXT_EXTENSIONS = [
+  '.json',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.map',
+  '.yml',
+  '.yaml',
 ];
 
+const LICENSE_FILE_PATTERN = /^(licen[cs]e|copying)/i;
+const NOTICE_FILE_PATTERN = /^notice/i;
+
+/** A license or notice file shipped by a package. */
+export interface LicenseDocument {
+  /** File name as shipped by the package. */
+  fileName: string;
+  kind: 'license' | 'notice';
+}
+
+function isTextFile(fileName: string): boolean {
+  const lowerCased = fileName.toLowerCase();
+  return !NON_TEXT_EXTENSIONS.some(extension => lowerCased.endsWith(extension));
+}
+
+/**
+ * Sorts the plain `LICENSE` / `COPYING` files before variants such as `LICENSE-MIT`, so
+ * that license text detection always looks at the main file first and stays stable.
+ */
+function compareDocuments(left: string, right: string): number {
+  const plain = (fileName: string): number =>
+    /^(licen[cs]e|copying)(\.[^.]+)?$/i.test(fileName) ? 0 : 1;
+  return plain(left) - plain(right) || left.localeCompare(right);
+}
+
+/**
+ * Lists the license and notice files a package ships.
+ *
+ * The package directory is read and matched case insensitively rather than probed for a
+ * fixed list of names: packages spell these files in every casing, and a fixed list silently
+ * misses the ones that do not match it.
+ */
+export function findLicenseDocuments(packagePath: string): LicenseDocument[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(packagePath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const documents: LicenseDocument[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !isTextFile(entry.name)) {
+      continue;
+    }
+    if (LICENSE_FILE_PATTERN.test(entry.name)) {
+      documents.push({ fileName: entry.name, kind: 'license' });
+    } else if (NOTICE_FILE_PATTERN.test(entry.name)) {
+      documents.push({ fileName: entry.name, kind: 'notice' });
+    }
+  }
+
+  return documents.sort(
+    (left, right) =>
+      left.kind.localeCompare(right.kind) ||
+      compareDocuments(left.fileName, right.fileName)
+  );
+}
 /**
  * Recognisable license texts, most specific first. Each entry requires all of its markers
  * to be present, which keeps a permissive match from swallowing a stricter license that
@@ -201,12 +261,15 @@ function licenseFromFile(filePath: string): string | undefined {
   return undefined;
 }
 
-/** Reads the license file of a package and recognises its license text. */
+/** Reads the license files of a package and recognises their license text. */
 export function licenseFromLicenseFile(
   packagePath: string
 ): string | undefined {
-  for (const fileName of LICENSE_FILE_NAMES) {
-    const detected = licenseFromFile(path.join(packagePath, fileName));
+  for (const document of findLicenseDocuments(packagePath)) {
+    if (document.kind !== 'license') {
+      continue;
+    }
+    const detected = licenseFromFile(path.join(packagePath, document.fileName));
     if (detected !== undefined) {
       return detected;
     }
