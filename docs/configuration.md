@@ -110,5 +110,8 @@ license produces a commit that says nothing. Two defaults exist for that:
 What remains are the changes worth reviewing: a dependency appears or disappears, or its
 license changes.
 
+There is deliberately no setting to ignore scan errors. `--allow-incomplete-scan` exists as a
+command line flag for local debugging; see [policy.md](policy.md#incomplete-scans).
+
 The `path` field is available but writes absolute paths of the machine that generated the
 file. Leave it out of a committed artifact.

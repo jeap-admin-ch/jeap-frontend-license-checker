@@ -14,6 +14,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { displayLicense, UNKNOWN_LICENSE } from './check';
+import type { ScanError } from './diagnostics';
 import { findLicenseDocuments } from './license-detection';
 import { scanPackages } from './scan';
 import type { ResolvedConfig, ScannedPackage } from './types';
@@ -47,6 +48,8 @@ export interface NoticeFile {
 export interface NoticeOutput {
   markdown: string;
   files: NoticeFile[];
+  /** Everything the scan could not examine, so a partial list is never taken for complete. */
+  scanErrors: ScanError[];
 }
 
 /** One license or notice document of a package, with its content. */
@@ -98,17 +101,20 @@ function fence(content: string): string {
 /** Collects the keys of the packages that are actually redistributed. */
 function redistributedKeys(
   config: ResolvedConfig,
-  indexed: ScannedPackage[]
+  indexed: ScannedPackage[],
+  scanErrors: ScanError[]
 ): Set<string> {
   if (config.notices.production) {
     return new Set(indexed.map(scanned => scanned.key));
   }
+  const production = scanPackages({
+    start: config.start,
+    production: true,
+    excludePrivatePackages: config.notices.excludePrivatePackages,
+  });
+  scanErrors.push(...production.errors);
   return new Set(
-    scanPackages({
-      start: config.start,
-      production: true,
-      excludePrivatePackages: config.notices.excludePrivatePackages,
-    })
+    production.packages
       .filter(scanned => !scanned.isRoot)
       .map(scanned => scanned.key)
   );
@@ -120,13 +126,15 @@ function redistributedKeys(
  * third-party dependency and is left out.
  */
 export function renderNotices(config: ResolvedConfig): NoticeOutput {
-  const packages = scanPackages({
+  const scan = scanPackages({
     start: config.start,
     production: config.notices.production,
     excludePrivatePackages: config.notices.excludePrivatePackages,
-  }).filter(scanned => !scanned.isRoot);
+  });
+  const packages = scan.packages.filter(scanned => !scanned.isRoot);
+  const scanErrors = [...scan.errors];
 
-  const redistributed = redistributedKeys(config, packages);
+  const redistributed = redistributedKeys(config, packages, scanErrors);
   const withTexts = config.notices.texts !== 'none';
   const lines: string[] = [];
   const files: NoticeFile[] = [];
@@ -193,5 +201,5 @@ export function renderNotices(config: ResolvedConfig): NoticeOutput {
       ? `${lines.join('\n')}\n\n# License texts\n\n${inlined.join('\n')}\n`
       : `${lines.join('\n')}\n`;
 
-  return { markdown, files };
+  return { markdown, files, scanErrors };
 }

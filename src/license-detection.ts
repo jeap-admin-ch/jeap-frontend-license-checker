@@ -10,6 +10,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { errorCode, isMissing, type ScanDiagnostics } from './diagnostics';
 import type { LicenseSource } from './types';
 
 /** The license of a package and where it was found. */
@@ -102,6 +103,8 @@ const NON_TEXT_EXTENSIONS = [
   '.yaml',
 ];
 
+const MAX_LICENSE_FILE_SIZE = 512 * 1024;
+
 const LICENSE_FILE_PATTERN = /^(licen[cs]e|copying)/i;
 const NOTICE_FILE_PATTERN = /^notice/i;
 
@@ -134,24 +137,73 @@ function compareDocuments(left: string, right: string): number {
  * fixed list of names: packages spell these files in every casing, and a fixed list silently
  * misses the ones that do not match it.
  */
-export function findLicenseDocuments(packagePath: string): LicenseDocument[] {
+export function findLicenseDocuments(
+  packagePath: string,
+  diagnostics?: ScanDiagnostics
+): LicenseDocument[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(packagePath, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    // An empty result would claim the package ships no license text, which is a different
+    // statement from "the directory could not be read".
+    diagnostics?.record({
+      kind: 'unreadable-directory',
+      message: `Cannot list the files of the installed package ${packagePath}`,
+      path: packagePath,
+      code: errorCode(error),
+      hint: isMissing(error)
+        ? 'the package directory disappeared during the scan; run the check again'
+        : 'the license and notice files of this package could not be found; check that the path is a readable directory',
+    });
     return [];
   }
 
   const documents: LicenseDocument[] = [];
   for (const entry of entries) {
-    if (!entry.isFile() || !isTextFile(entry.name)) {
+    if (!isTextFile(entry.name)) {
       continue;
     }
-    if (LICENSE_FILE_PATTERN.test(entry.name)) {
-      documents.push({ fileName: entry.name, kind: 'license' });
-    } else if (NOTICE_FILE_PATTERN.test(entry.name)) {
-      documents.push({ fileName: entry.name, kind: 'notice' });
+    const isLicense = LICENSE_FILE_PATTERN.test(entry.name);
+    const isNotice = !isLicense && NOTICE_FILE_PATTERN.test(entry.name);
+    if (!isLicense && !isNotice) {
+      continue;
     }
+
+    // The entry type comes from the directory listing, so a symlinked license file is not a
+    // file yet. Resolving it also catches an entry that carries a license file's name but is
+    // not one, which must not be passed over as "this package ships no license text".
+    const target = path.join(packagePath, entry.name);
+    let stats: fs.Stats | undefined;
+    try {
+      stats = fs.statSync(target, { throwIfNoEntry: false });
+    } catch (error) {
+      diagnostics?.record({
+        kind: 'unreadable-license-file',
+        message: `Cannot read the license file ${target}`,
+        path: target,
+        code: errorCode(error),
+        hint: 'the license text of this package could not be collected; check that the path is a readable file',
+      });
+      continue;
+    }
+    if (stats === undefined) {
+      continue;
+    }
+    if (!stats.isFile()) {
+      diagnostics?.record({
+        kind: 'unreadable-license-file',
+        message: `The license file ${target} is not a file`,
+        path: target,
+        hint: 'the license text of this package could not be collected from it',
+      });
+      continue;
+    }
+
+    documents.push({
+      fileName: entry.name,
+      kind: isLicense ? 'license' : 'notice',
+    });
   }
 
   return documents.sort(
@@ -160,6 +212,7 @@ export function findLicenseDocuments(packagePath: string): LicenseDocument[] {
       compareDocuments(left.fileName, right.fileName)
   );
 }
+
 /**
  * Recognisable license texts, most specific first. Each entry requires all of its markers
  * to be present, which keeps a permissive match from swallowing a stricter license that
@@ -234,15 +287,45 @@ const LICENSE_TEXT_MARKERS: ReadonlyArray<{
 ];
 
 /** Recognises the license text of a single file. */
-function licenseFromFile(filePath: string): string | undefined {
+function licenseFromFile(
+  filePath: string,
+  diagnostics?: ScanDiagnostics
+): string | undefined {
   let content: string;
   try {
     const stats = fs.statSync(filePath);
-    if (!stats.isFile() || stats.size > 512 * 1024) {
+    if (!stats.isFile()) {
+      diagnostics?.record({
+        kind: 'unreadable-license-file',
+        message: `The license file ${filePath} is not a file`,
+        path: filePath,
+        hint: 'the license of this package could not be read from it',
+      });
+      return undefined;
+    }
+    if (stats.size > MAX_LICENSE_FILE_SIZE) {
+      diagnostics?.record({
+        kind: 'unreadable-license-file',
+        message: `The license file ${filePath} is ${stats.size} bytes and exceeds the limit of ${MAX_LICENSE_FILE_SIZE} bytes`,
+        path: filePath,
+        hint: 'it was not read, so the license of this package could not be determined from it',
+      });
       return undefined;
     }
     content = fs.readFileSync(filePath, 'utf8');
-  } catch {
+  } catch (error) {
+    // A file that is simply not there is an answer: the package declares a license file it
+    // does not ship, which surfaces as an unknown license and needs a decision, not a
+    // filesystem error. Anything else means the answer is unknown.
+    if (!isMissing(error)) {
+      diagnostics?.record({
+        kind: 'unreadable-license-file',
+        message: `Cannot read the license file ${filePath}`,
+        path: filePath,
+        code: errorCode(error),
+        hint: 'the license of this package could not be determined from it; check that the path is a readable file',
+      });
+    }
     return undefined;
   }
 
@@ -263,13 +346,17 @@ function licenseFromFile(filePath: string): string | undefined {
 
 /** Reads the license files of a package and recognises their license text. */
 export function licenseFromLicenseFile(
-  packagePath: string
+  packagePath: string,
+  diagnostics?: ScanDiagnostics
 ): string | undefined {
-  for (const document of findLicenseDocuments(packagePath)) {
+  for (const document of findLicenseDocuments(packagePath, diagnostics)) {
     if (document.kind !== 'license') {
       continue;
     }
-    const detected = licenseFromFile(path.join(packagePath, document.fileName));
+    const detected = licenseFromFile(
+      path.join(packagePath, document.fileName),
+      diagnostics
+    );
     if (detected !== undefined) {
       return detected;
     }
@@ -286,7 +373,8 @@ const SEE_LICENSE_IN = /^SEE LICENSE IN\s+(.+)$/i;
 /** Determines the license of an installed package. */
 export function detectLicense(
   manifest: PackageManifest,
-  packagePath: string
+  packagePath: string,
+  diagnostics?: ScanDiagnostics
 ): DetectedLicense {
   const declared = licenseFromManifest(manifest);
   if (declared !== undefined) {
@@ -295,14 +383,15 @@ export function detectLicense(
       return { license: declared, source: 'manifest' };
     }
     const referenced = licenseFromFile(
-      path.join(packagePath, reference[1]!.trim())
+      path.join(packagePath, reference[1]!.trim()),
+      diagnostics
     );
     if (referenced !== undefined) {
       return { license: referenced, source: 'license-file' };
     }
   }
 
-  const detected = licenseFromLicenseFile(packagePath);
+  const detected = licenseFromLicenseFile(packagePath, diagnostics);
   if (detected !== undefined) {
     return { license: detected, source: 'license-file' };
   }

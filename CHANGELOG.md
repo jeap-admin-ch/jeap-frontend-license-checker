@@ -37,4 +37,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `license` file is no longer reported as having no license.
 - The notice file names dependencies without their version by default, and the copied texts are
   named after the package, so a committed notice file does not change on a dependency update.
+- The check fails when the dependency tree could not be scanned completely, and reports each
+  thing it could not examine with the path, the system error, the requiring package, the
+  searched locations and what to do about it. A mandatory dependency that cannot be resolved,
+  an unreadable `node_modules`, scope directory, package directory, manifest or license file,
+  and a manifest that cannot be parsed or names no package all count; a path that is simply not
+  there does not. Previously such cases were skipped quietly and the run could report success
+  although packages were never examined. Exit code `3` keeps this apart from a policy
+  violation, `notices` writes nothing from a partial scan, and `--allow-incomplete-scan`
+  downgrades it for local debugging.
+- An unknown entry in `notices.fields` is refused instead of silently producing no line.
 - No runtime dependencies.
