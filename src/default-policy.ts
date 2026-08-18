@@ -23,7 +23,6 @@ export const JEAP_RECOMMENDED_LICENSES: readonly string[] = [
   'MIT-0',
   'MPL-2.0',
   'PostgreSQL',
-  'Public Domain',
   'Python-2.0',
   'Unlicense',
   'UPL-1.0',

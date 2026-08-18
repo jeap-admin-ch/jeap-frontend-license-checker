@@ -64,6 +64,34 @@ describe('check', () => {
     assert.equal(item?.package.license, '(MIT OR GPL-2.0)');
   });
 
+  /**
+   * A free-form claim such as "Public Domain" is not an SPDX license: what it grants has to
+   * be established per package, so it must not pass through the policy on its own.
+   */
+  it('reports a free-form public domain claim as a problem', () => {
+    const result = check(configure());
+    assert.deepEqual(verdictOf(result, 'public-domain-claim@0.0.1'), {
+      kind: 'problem',
+      cause: 'not-allowed',
+    });
+  });
+
+  it('accepts a free-form public domain claim through an exception for that package', () => {
+    const result = check(
+      configure({
+        exceptions: {
+          'public-domain-claim@*': {
+            reason: 'Public domain dedication by the author.',
+          },
+        },
+      })
+    );
+    assert.equal(
+      verdictOf(result, 'public-domain-claim@0.0.1').kind,
+      'exception'
+    );
+  });
+
   it('reports a package without any license information as a problem', () => {
     const result = check(configure());
     assert.deepEqual(verdictOf(result, 'no-metadata@3.0.0'), {
@@ -130,6 +158,7 @@ describe('check', () => {
           'no-metadata@*': { reason: 'Needed.' },
           '@scope/widget@*': { reason: 'Needed.' },
           'dual-copyleft@*': { reason: 'Needed.' },
+          'public-domain-claim@*': { reason: 'Needed.' },
           'removed-package@1.0.0': { reason: 'Stale.' },
         },
         failOnUnusedExceptions: false,
@@ -150,6 +179,9 @@ describe('check', () => {
           },
           'legacy-array@*': {
             reason: 'Permissive alternative chosen deliberately.',
+          },
+          'public-domain-claim@*': {
+            reason: 'Public domain dedication by the author.',
           },
         },
         allowDualLicenseChoice: false,
