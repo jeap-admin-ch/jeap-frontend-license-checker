@@ -37,20 +37,10 @@ npx jeap-frontend-license-checker notices    # write the third-party notices
 
 The short alias `jeap-license-check` is installed as well.
 
-```text
-Options:
-  --start <dir>             Project directory to inspect (default: the working directory)
-  --config <file>           Configuration file to use instead of jeap-license-check.json
-  --production              Only consider production dependencies
-  --exclude-private         Skip packages marked as private
-  --allow-unused-exceptions Do not fail on configured exceptions that are no longer needed
-  --allow-incomplete-scan   Report what could not be scanned, but do not fail on it
-  --out <file>              Write the output to a file instead of stdout (notices)
-  --json                    Print the check result as JSON
-  --quiet                   Print nothing on success
-  -h, --help                Show this help
-  -v, --version             Show the version of this tool
+Run `jeap-frontend-license-checker --help` for the full list of options; the settings behind
+them are documented in [docs/configuration.md](docs/configuration.md).
 
+```text
 Exit codes:
   0  the check passed
   1  the license policy was violated

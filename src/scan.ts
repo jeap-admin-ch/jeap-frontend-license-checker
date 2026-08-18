@@ -289,6 +289,14 @@ function resolveDependency(
   let current = fromPath;
 
   for (;;) {
+    // Checked before the candidate is built, so no directory outside the project is probed
+    // and a dependency is never resolved from outside it.
+    const inside =
+      current === rootPath || current.startsWith(rootPath + path.sep);
+    if (!inside) {
+      return { outcome: missing(), searched };
+    }
+
     const candidate = path.join(current, 'node_modules', dependencyName);
     searched.push(candidate);
 
@@ -314,7 +322,7 @@ function resolveDependency(
     }
 
     const parent = path.dirname(current);
-    if (parent === current || !current.startsWith(rootPath)) {
+    if (parent === current) {
       return { outcome: missing(), searched };
     }
     current = parent;

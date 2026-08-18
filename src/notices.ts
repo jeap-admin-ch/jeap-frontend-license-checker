@@ -14,8 +14,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { displayLicense, UNKNOWN_LICENSE } from './check';
-import type { ScanError } from './diagnostics';
-import { findLicenseDocuments } from './license-detection';
+import { errorCode, ScanDiagnostics, type ScanError } from './diagnostics';
+import {
+  findLicenseDocuments,
+  MAX_LICENSE_FILE_SIZE,
+} from './license-detection';
 import { scanPackages } from './scan';
 import type { ResolvedConfig, ScannedPackage } from './types';
 
@@ -60,26 +63,79 @@ interface CollectedDocument {
 }
 
 /**
- * The directory name a package's texts are copied into. The scope separator is replaced
- * because it would otherwise create a directory level that is easy to lose when the folder
- * is copied around.
+ * The directory name a package's texts are copied into.
+ *
+ * The name comes from a third-party manifest, so it is treated as hostile input: a package
+ * calling itself `..` would otherwise write its text outside the texts directory and over a
+ * file of the project. Only characters that occur in npm package names survive, and a name
+ * made of dots cannot climb out of the directory.
  */
-function textDirectoryName(scanned: ScannedPackage): string {
-  return scanned.name.replace(/\//g, '__');
+function textDirectoryName(
+  scanned: ScannedPackage,
+  qualified: boolean
+): string {
+  const sanitize = (value: string): string =>
+    value
+      .replace(/\//g, '__')
+      .replace(/[^A-Za-z0-9@._-]/g, '_')
+      // A run of dots is what climbs out of a directory, and a leading one hides it.
+      .replace(/\.{2,}/g, dots => '_'.repeat(dots.length))
+      .replace(/^\./, '_');
+
+  const name = sanitize(scanned.name);
+  // Two installed versions of one package would otherwise share a directory, and the text
+  // written last would be attributed to both.
+  return qualified ? `${name}@${sanitize(scanned.version)}` : name;
 }
 
-function collectDocuments(scanned: ScannedPackage): CollectedDocument[] {
+/** Names that are installed in more than one version, whose texts must not share a directory. */
+function ambiguousNames(packages: ScannedPackage[]): Set<string> {
+  const versions = new Map<string, Set<string>>();
+  for (const scanned of packages) {
+    const known = versions.get(scanned.name) ?? new Set<string>();
+    known.add(scanned.version);
+    versions.set(scanned.name, known);
+  }
+  return new Set(
+    [...versions.entries()]
+      .filter(([, known]) => known.size > 1)
+      .map(([name]) => name)
+  );
+}
+
+function collectDocuments(
+  scanned: ScannedPackage,
+  diagnostics: ScanDiagnostics
+): CollectedDocument[] {
   const collected: CollectedDocument[] = [];
-  for (const document of findLicenseDocuments(scanned.path)) {
+  for (const document of findLicenseDocuments(scanned.path, diagnostics)) {
+    const filePath = path.join(scanned.path, document.fileName);
     try {
+      const stats = fs.statSync(filePath);
+      if (stats.size > MAX_LICENSE_FILE_SIZE) {
+        diagnostics.record({
+          kind: 'unreadable-license-file',
+          message: `The license file ${filePath} is ${stats.size} bytes and exceeds the limit of ${MAX_LICENSE_FILE_SIZE} bytes`,
+          path: filePath,
+          hint: `it was not copied, so the notices do not carry the license text of ${scanned.key}`,
+        });
+        continue;
+      }
       collected.push({
         fileName: document.fileName,
         kind: document.kind,
-        content: fs.readFileSync(path.join(scanned.path, document.fileName)),
+        content: fs.readFileSync(filePath),
       });
-    } catch {
-      // A file that disappeared between listing and reading is simply not copied; the
-      // package is then reported as shipping no text.
+    } catch (error) {
+      // Reporting the package as shipping no license text would be a false statement in a
+      // document that exists to reproduce exactly these texts.
+      diagnostics.record({
+        kind: 'unreadable-license-file',
+        message: `Cannot read the license file ${filePath}`,
+        path: filePath,
+        code: errorCode(error),
+        hint: `the notices cannot reproduce the license text of ${scanned.key}; check that the path is a readable file`,
+      });
     }
   }
   return collected;
@@ -133,8 +189,12 @@ export function renderNotices(config: ResolvedConfig): NoticeOutput {
   });
   const packages = scan.packages.filter(scanned => !scanned.isRoot);
   const scanErrors = [...scan.errors];
+  const diagnostics = new ScanDiagnostics();
 
   const redistributed = redistributedKeys(config, packages, scanErrors);
+  const qualifiedNames = ambiguousNames(
+    packages.filter(scanned => redistributed.has(scanned.key))
+  );
   const withTexts = config.notices.texts !== 'none';
   const lines: string[] = [];
   const files: NoticeFile[] = [];
@@ -164,16 +224,26 @@ export function renderNotices(config: ResolvedConfig): NoticeOutput {
       continue;
     }
 
-    const documents = collectDocuments(scanned);
+    const errorsBefore = diagnostics.errors.length;
+    const documents = collectDocuments(scanned, diagnostics);
     if (documents.length === 0) {
-      // Nothing is synthesised here: inserting the canonical text of the declared license
-      // would attribute a copyright holder that the package itself does not name.
-      lines.push('    - text: not shipped by the package');
+      // "Ships no text" is a statement about the package; when its files could not be read
+      // the truthful statement is that the text is missing from these notices.
+      lines.push(
+        diagnostics.errors.length > errorsBefore
+          ? '    - text: could not be read, see the reported scan errors'
+          : // Nothing is synthesised here: inserting the canonical text of the declared
+            // license would attribute a copyright holder the package does not name.
+            '    - text: not shipped by the package'
+      );
       continue;
     }
 
     if (config.notices.texts === 'folder') {
-      const directory = textDirectoryName(scanned);
+      const directory = textDirectoryName(
+        scanned,
+        qualifiedNames.has(scanned.name)
+      );
       for (const document of documents) {
         const relativePath = `${config.notices.textsDir}/${directory}/${document.fileName}`;
         files.push({ relativePath, content: document.content });
@@ -201,5 +271,9 @@ export function renderNotices(config: ResolvedConfig): NoticeOutput {
       ? `${lines.join('\n')}\n\n# License texts\n\n${inlined.join('\n')}\n`
       : `${lines.join('\n')}\n`;
 
-  return { markdown, files, scanErrors };
+  return {
+    markdown,
+    files,
+    scanErrors: [...scanErrors, ...diagnostics.errors],
+  };
 }

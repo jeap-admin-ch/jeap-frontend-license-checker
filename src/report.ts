@@ -1,7 +1,7 @@
 /**
  * Rendering of a check result, as readable text or as JSON for further processing.
  */
-import { displayLicense } from './check';
+import { displayLicense, hasPolicyFailure } from './check';
 import type { ScanError } from './diagnostics';
 import type { CheckResult, CheckedPackage } from './types';
 
@@ -96,8 +96,17 @@ export function renderScanErrors(errors: readonly ScanError[]): string {
   return lines.join('\n');
 }
 
+/** How the result is being acted on, so the printed verdict matches the exit code. */
+export interface RenderOptions {
+  /** Scan errors are reported but tolerated, because --allow-incomplete-scan was given. */
+  toleratedScanErrors?: boolean;
+}
+
 /** Renders the check result as human readable text. */
-export function renderText(result: CheckResult): string {
+export function renderText(
+  result: CheckResult,
+  options: RenderOptions = {}
+): string {
   const lines: string[] = [];
   const exceptions = result.packages
     .filter(item => item.verdict.kind === 'exception')
@@ -226,12 +235,26 @@ export function renderText(result: CheckResult): string {
     .filter((part): part is string => part !== undefined)
     .join(' ');
 
+  // With --allow-incomplete-scan the run may pass despite scan errors; the verdict has to
+  // say the same thing as the exit code.
+  const passed =
+    result.ok ||
+    (options.toleratedScanErrors === true && !hasPolicyFailure(result));
+
   lines.push('');
   lines.push(
-    result.ok
+    passed
       ? `${paint('green', 'All licenses ok')}: ${summary}`
       : `${paint('red', 'Licenses not ok')}: ${summary}`
   );
+  if (passed && result.scanErrors.length > 0) {
+    lines.push(
+      paint(
+        'yellow',
+        'Passing anyway because --allow-incomplete-scan was given; the result above is incomplete.'
+      )
+    );
+  }
 
   return lines.join('\n');
 }

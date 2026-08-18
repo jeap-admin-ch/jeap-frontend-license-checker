@@ -44,15 +44,27 @@ The notice file stays a readable index and the original files are copied into
 ```text
 THIRD-PARTY-LICENSES.md
 third-party-licenses/
+  .jeap-license-texts        <- marks the directory as generated
   @angular__core/LICENSE
   rxjs/LICENSE.txt
   some-package/LICENSE
   some-package/NOTICE
+  ajv@8.18.0/LICENSE         <- version qualified, because two versions are installed
+  ajv@8.20.0/LICENSE
 ```
 
+A package installed in more than one version gets a directory per version, so one version's
+copyright text is never attributed to the other. Every other package keeps a path without a
+version, which is what stops the notice file from churning on an update.
+
 The directory is rebuilt on every run, so texts of dependencies that were removed do not
-linger. For that reason it must be a directory below the notice file; a path escaping it is
-refused.
+linger. Two things follow from that: it must be a directory below the notice file, and it must
+be one this tool created. The `.jeap-license-texts` marker records that; a pre-existing
+directory without it is never deleted, and the run fails with a message naming it instead.
+
+Package names come from third-party manifests and are treated as such: a name is reduced to
+the characters that occur in npm package names, and no name can place a file outside the texts
+directory.
 
 ### `inline`
 
