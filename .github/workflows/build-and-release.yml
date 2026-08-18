@@ -1,0 +1,299 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - '**' # every branch; tags are excluded so the release marker tag does not re-run CI
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24.16.0'
+
+jobs:
+  quality:
+    name: Lint and format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+  license:
+    name: Update third-party licenses
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          token: ${{ secrets.CI_PUSH_TOKEN || github.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # The checker checks and documents its own dependencies.
+      - name: Check the licenses of the own dependencies
+        run: node dist/cli.js
+
+      - name: Generate THIRD-PARTY-LICENSES.md
+        run: npm run notices
+
+      - name: Update or verify THIRD-PARTY-LICENSES.md
+        run: |
+          if [ -z "$(git status --porcelain -- THIRD-PARTY-LICENSES.md)" ]; then
+            echo "THIRD-PARTY-LICENSES.md is already up to date."
+            exit 0
+          fi
+
+          # On main, never write to the branch: fail and require the update via a pull request.
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "THIRD-PARTY-LICENSES.md is out of date on main."
+            echo "Regenerate it on a branch and merge it via pull request: npm run notices"
+            exit 1
+          fi
+
+          # On feature branches, regenerate and push the updated file, then fail on purpose.
+          # The push creates a new commit, so this run is building stale licenses: the
+          # downstream jobs must not continue. Failing here notifies the developer;
+          # re-running the workflow builds the corrected commit.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add THIRD-PARTY-LICENSES.md
+          git commit -m "Update third-party licenses"
+          git push
+
+          echo "THIRD-PARTY-LICENSES.md was out of date; regenerated it and pushed a new commit."
+          echo "Failing this run on purpose so the build is not completed against stale licenses."
+          echo "Re-run the workflow (or push again) to build the updated commit."
+          exit 1
+
+  test:
+    name: Node.js ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    needs:
+      - license
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20.11.0', '22.x', '24.x']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    needs:
+      - license
+      - test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify package contents
+        run: |
+          test -f package.json
+          test -f README.md
+          test -f LICENSE
+          test -f CHANGELOG.md
+          test -f THIRD-PARTY-LICENSES.md
+          test -f dist/cli.js
+          test -f dist/index.js
+          test -f dist/index.d.ts
+          node -e "const p=require('./package.json'); if (!p.name || !p.version) throw new Error('Missing package name or version'); if (p.private === true) throw new Error('Package must not be private'); if (Object.keys(p.dependencies || {}).length > 0) throw new Error('The checker must not have runtime dependencies'); console.log(p.name + '@' + p.version)"
+
+      - name: Create npm package tarball
+        run: npm pack
+
+      # Install the packed tarball into a throwaway project and run the binary, so a broken
+      # bin entry, a missing file or a bad shebang fails here rather than after publishing.
+      - name: Smoke test the packed tarball
+        run: |
+          TARBALL="$(ls jeap-jeap-frontend-license-checker-*.tgz)"
+          SMOKE="$(mktemp -d)"
+          cp "${TARBALL}" "${SMOKE}/"
+          cd "${SMOKE}"
+          npm init -y >/dev/null
+          npm pkg set license=Apache-2.0 >/dev/null
+          npm install --no-audit --no-fund "./${TARBALL}"
+          npx jeap-frontend-license-checker --version
+          npx jeap-frontend-license-checker
+          npx jeap-license-check notices | head -5
+
+      - name: Publish dry run
+        run: npm publish --dry-run --access public
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: jeap-frontend-license-checker-package
+          path: '*.tgz'
+          if-no-files-found: error
+
+  release:
+    name: Release to npm
+    runs-on: ubuntu-latest
+    needs:
+      - quality
+      - license
+      - test
+      - package
+    # Only on main (push or manual dispatch), after all checks pass. The "already released"
+    # guard below makes a no-version-bump merge a no-op.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+
+    # The release runs in the protected "release" environment, which scopes the bootstrap
+    # NPM_TOKEN secret to this job. The npm trusted publisher must be configured for this
+    # workflow file (build-and-release.yml) and the same environment.
+    environment: release
+
+    permissions:
+      contents: write # push the release tag with the default GITHUB_TOKEN
+      id-token: write # OIDC token for npm trusted publishing
+
+    # While the one-time bootstrap secret NPM_TOKEN exists, the token publish step runs. Once
+    # the npm trusted publisher is configured and the secret is deleted, the OIDC publish step
+    # takes over automatically (no workflow edit).
+    env:
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version and tag
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Skip if this version is already released
+        id: guard
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null \
+            || git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists; ${TAG} is already released. Skipping."
+            echo "release=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Releasing ${TAG}."
+            echo "release=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Setup Node.js for npm registry
+        if: steps.guard.outputs.release == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm for trusted publishing
+        if: steps.guard.outputs.release == 'true'
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        if: steps.guard.outputs.release == 'true'
+        run: npm ci
+
+      - name: Build
+        if: steps.guard.outputs.release == 'true'
+        run: npm run build
+
+      - name: Verify THIRD-PARTY-LICENSES.md is up to date
+        if: steps.guard.outputs.release == 'true'
+        run: |
+          node dist/cli.js notices --out THIRD-PARTY-LICENSES.generated.md
+          diff -u THIRD-PARTY-LICENSES.md THIRD-PARTY-LICENSES.generated.md
+          rm THIRD-PARTY-LICENSES.generated.md
+
+      - name: Publish to npm (token bootstrap)
+        if: steps.guard.outputs.release == 'true' && env.HAS_NPM_TOKEN == 'true'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to npm (trusted publishing / OIDC)
+        if: steps.guard.outputs.release == 'true' && env.HAS_NPM_TOKEN != 'true'
+        run: npm publish --access public
+
+      # Record the published version with a tag (default GITHUB_TOKEN is enough; the tag is a
+      # marker and idempotency guard, not a release trigger).
+      - name: Tag the published version
+        if: steps.guard.outputs.release == 'true'
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "Release ${TAG}"
+          git push origin "${TAG}"
+          echo "Published and tagged ${TAG}."
