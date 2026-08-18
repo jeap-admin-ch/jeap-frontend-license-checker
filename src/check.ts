@@ -76,7 +76,7 @@ function judge(
 
 /** Runs the license policy check for a project. */
 export function check(config: ResolvedConfig): CheckResult {
-  const scanned = scanPackages({
+  const scan = scanPackages({
     start: config.start,
     production: config.production,
     excludePrivatePackages: config.excludePrivatePackages,
@@ -91,7 +91,7 @@ export function check(config: ResolvedConfig): CheckResult {
   const licenseCounts: Record<string, number> = {};
   const packages: CheckedPackage[] = [];
 
-  for (const item of scanned) {
+  for (const item of scan.packages) {
     const license = displayLicense(item);
     licenseCounts[license] = (licenseCounts[license] ?? 0) + 1;
     packages.push({
@@ -108,11 +108,14 @@ export function check(config: ResolvedConfig): CheckResult {
   const hasUnusedExceptions =
     config.failOnUnusedExceptions && unusedExceptionKeys.length > 0;
 
+  // A package that was never examined must not be able to make the run pass, so an
+  // incomplete scan fails regardless of what the packages that were examined say.
   return {
     config,
     packages,
+    scanErrors: scan.errors,
     licenseCounts,
     unusedExceptionKeys,
-    ok: !hasProblems && !hasUnusedExceptions,
+    ok: !hasProblems && !hasUnusedExceptions && scan.errors.length === 0,
   };
 }

@@ -2,6 +2,8 @@
  * Shared types of the jEAP frontend license checker.
  */
 
+import type { ScanError } from './diagnostics';
+
 /** Where the license information of a package was taken from. */
 export type LicenseSource = 'manifest' | 'license-file' | 'none';
 
@@ -98,6 +100,11 @@ export interface CheckedPackage {
 export interface CheckResult {
   config: ResolvedConfig;
   packages: CheckedPackage[];
+  /**
+   * Everything the scan could not examine. A non-empty list means the result is not the
+   * whole truth, so the run does not pass.
+   */
+  scanErrors: ScanError[];
   /** Number of packages per license expression, for the overview section. */
   licenseCounts: Record<string, number>;
   unusedExceptionKeys: string[];

@@ -69,6 +69,48 @@ The same base policy never accepts the strong copyleft licenses:
 Listing them explicitly is what makes a dual licensed package show up as a deliberate choice of
 the permissive alternative rather than passing unnoticed.
 
+## Incomplete scans
+
+A checker that reports success because it could not look is worse than no checker. The scan
+therefore separates two things that are easy to confuse:
+
+- **Not there** is an answer. A package without nested dependencies has no `node_modules`
+  directory, a platform specific optional dependency for another operating system is not
+  installed, and a package may declare a license file it does not ship. None of these is an
+  error.
+- **Could not be read** means the answer is unknown. An existing but unreadable
+  `node_modules`, scope directory, package directory, manifest or license file, a manifest
+  that cannot be parsed or that names no package, and a mandatory dependency that cannot be
+  resolved all mean that something was not examined.
+
+Everything of the second kind is collected and reported with the path, the system error, the
+package that required it, the places that were searched and what to do about it:
+
+```text
+The dependency tree could not be scanned completely:
+  Cannot find the dependency "left-pad" required by my-app@1.0.0
+    Kind:         unresolved-dependency
+    Path:         /home/dev/project
+    Dependency:   left-pad
+    Required by:  my-app@1.0.0 (/home/dev/project)
+    Looked in:    /home/dev/project/node_modules/left-pad
+    What to do:   "left-pad" is a mandatory dependency, so it is part of what the project
+                  ships and its license must be checked; run "npm ci" so that every declared
+                  dependency is installed before the licenses are checked
+```
+
+**A scan error fails the check.** `All licenses ok` is only reported when nothing was skipped,
+whatever the packages that were examined say. The run then exits with `3`, which is kept apart
+from the `1` of a policy violation: a tree that could not be read and a dependency with a
+forbidden license call for entirely different responses.
+
+`notices` refuses to write anything in that state, because a notice file built from a partial
+scan is a compliance record that claims to list every dependency while some were never seen.
+
+`--allow-incomplete-scan` reports the errors but lets the run pass. It exists for debugging a
+half-installed tree locally and is a command line flag only, deliberately not a configuration
+setting: in a configuration file it would be set once and silently suppress the check forever.
+
 ## Changing the policy
 
 Widen it for a single project with `allowLicenses`, tighten it with `denyLicenses`. Start from

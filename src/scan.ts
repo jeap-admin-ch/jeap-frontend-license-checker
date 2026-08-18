@@ -4,11 +4,22 @@
  * The scan walks `node_modules` directly instead of the lock file, so it sees exactly what
  * is installed, including nested duplicates and hoisted transitive dependencies. Symlinked
  * packages (workspaces, `npm link`) are followed once, guarded by their real path.
+ *
+ * Nothing is skipped quietly. Whenever a directory, a manifest or a dependency cannot be
+ * examined, the reason is recorded and the scan is marked incomplete, because a package that
+ * was never looked at must not be able to pass the license check.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import {
+  errorCode,
+  isMissing,
+  ScanDiagnostics,
+  type ScanError,
+} from './diagnostics';
 import { detectLicense, type PackageManifest } from './license-detection';
+import { failed, found, missing, type Outcome } from './outcome';
 import type { ScannedPackage } from './types';
 
 /** Options of a scan. */
@@ -21,20 +32,79 @@ export interface ScanOptions {
   excludePrivatePackages: boolean;
 }
 
-function readManifest(packagePath: string): PackageManifest | undefined {
+/** The packages a scan found, together with everything it could not examine. */
+export interface ScanResult {
+  packages: ScannedPackage[];
+  errors: ScanError[];
+}
+
+const INSTALL_HINT =
+  'run "npm ci" so that every declared dependency is installed before the licenses are checked';
+
+/**
+ * Reads a package manifest. A package is identified by its manifest, so a manifest that
+ * cannot be read, cannot be parsed, or does not name the package is an error rather than a
+ * package that gets left out.
+ */
+function readManifest(packagePath: string): Outcome<PackageManifest> {
+  const manifestPath = path.join(packagePath, 'package.json');
+
+  let content: string;
   try {
-    const content = fs.readFileSync(
-      path.join(packagePath, 'package.json'),
-      'utf8'
-    );
-    const parsed: unknown = JSON.parse(content);
-    if (parsed === null || typeof parsed !== 'object') {
-      return undefined;
+    content = fs.readFileSync(manifestPath, 'utf8');
+  } catch (error) {
+    if (isMissing(error)) {
+      return missing();
     }
-    return parsed as PackageManifest;
-  } catch {
-    return undefined;
+    return failed({
+      kind: 'unreadable-manifest',
+      message: `Cannot read the package manifest ${manifestPath}`,
+      path: manifestPath,
+      code: errorCode(error),
+      hint: 'check the file permissions and that the path is a readable file; the package could not be identified, so its license is unknown',
+    });
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    return failed({
+      kind: 'invalid-manifest',
+      message: `Cannot parse the package manifest ${manifestPath}: ${(error as Error).message}`,
+      path: manifestPath,
+      hint: 'the installed package is damaged; reinstall it with "npm ci"',
+    });
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return failed({
+      kind: 'invalid-manifest',
+      message: `The package manifest ${manifestPath} does not contain a JSON object`,
+      path: manifestPath,
+      hint: 'the installed package is damaged; reinstall it with "npm ci"',
+    });
+  }
+
+  const manifest = parsed as PackageManifest;
+  if (typeof manifest.name !== 'string' || manifest.name.trim() === '') {
+    return failed({
+      kind: 'invalid-manifest',
+      message: `The package manifest ${manifestPath} declares no name`,
+      path: manifestPath,
+      hint: 'a package without a name cannot be attributed or exempted by name; reinstall it with "npm ci"',
+    });
+  }
+  if (typeof manifest.version !== 'string' || manifest.version.trim() === '') {
+    return failed({
+      kind: 'invalid-manifest',
+      message: `The package manifest ${manifestPath} declares no version`,
+      path: manifestPath,
+      hint: 'a package without a version cannot be identified in the report; reinstall it with "npm ci"',
+    });
+  }
+
+  return found(manifest);
 }
 
 function normalizeRepository(repository: unknown): string | undefined {
@@ -74,13 +144,13 @@ function normalizePublisher(author: unknown): string | undefined {
 function toScannedPackage(
   manifest: PackageManifest,
   packagePath: string,
-  fallbackName: string,
-  isRoot: boolean
+  isRoot: boolean,
+  diagnostics: ScanDiagnostics
 ): ScannedPackage {
-  const name = typeof manifest.name === 'string' ? manifest.name : fallbackName;
-  const version =
-    typeof manifest.version === 'string' ? manifest.version : '0.0.0';
-  const detected = detectLicense(manifest, packagePath);
+  // readManifest guarantees both, so nothing has to be invented here.
+  const name = manifest.name as string;
+  const version = manifest.version as string;
+  const detected = detectLicense(manifest, packagePath, diagnostics);
 
   const scanned: ScannedPackage = {
     key: `${name}@${version}`,
@@ -111,17 +181,44 @@ function toScannedPackage(
   return scanned;
 }
 
-/** Lists the package directories directly contained in a `node_modules` directory. */
-function listPackageDirectories(nodeModulesPath: string): string[] {
-  let entries: fs.Dirent[];
+/** Reads a directory, telling an absent directory apart from an unreadable one. */
+function readDirectory(directoryPath: string): Outcome<fs.Dirent[]> {
   try {
-    entries = fs.readdirSync(nodeModulesPath, { withFileTypes: true });
-  } catch {
+    return found(fs.readdirSync(directoryPath, { withFileTypes: true }));
+  } catch (error) {
+    if (isMissing(error)) {
+      return missing();
+    }
+    return failed({
+      kind: 'unreadable-directory',
+      message: `Cannot list the installed packages in ${directoryPath}`,
+      path: directoryPath,
+      code: errorCode(error),
+      hint: 'every package below this directory was left unchecked; check that the path is a readable directory',
+    });
+  }
+}
+
+/**
+ * Lists the package directories directly contained in a `node_modules` directory. An
+ * unreadable `node_modules` or scope directory hides every package inside it, so it is
+ * recorded instead of being treated as empty.
+ */
+function listPackageDirectories(
+  nodeModulesPath: string,
+  diagnostics: ScanDiagnostics
+): string[] {
+  const entries = readDirectory(nodeModulesPath);
+  if (entries.status === 'missing') {
+    return [];
+  }
+  if (entries.status === 'failed') {
+    diagnostics.record(entries.error);
     return [];
   }
 
   const directories: string[] = [];
-  for (const entry of entries) {
+  for (const entry of entries.value) {
     if (entry.name.startsWith('.')) {
       continue;
     }
@@ -132,13 +229,19 @@ function listPackageDirectories(nodeModulesPath: string): string[] {
     const entryPath = path.join(nodeModulesPath, entry.name);
     if (entry.name.startsWith('@')) {
       // A scope directory holds the actual packages one level deeper.
-      let scopedEntries: fs.Dirent[];
-      try {
-        scopedEntries = fs.readdirSync(entryPath, { withFileTypes: true });
-      } catch {
+      const scopedEntries = readDirectory(entryPath);
+      if (scopedEntries.status === 'failed') {
+        diagnostics.record({
+          ...scopedEntries.error,
+          message: `Cannot list the packages of the scope ${entry.name} in ${entryPath}`,
+          hint: `every package of the scope ${entry.name} was left unchecked; check that the path is a readable directory`,
+        });
         continue;
       }
-      for (const scopedEntry of scopedEntries) {
+      if (scopedEntries.status === 'missing') {
+        continue;
+      }
+      for (const scopedEntry of scopedEntries.value) {
         if (scopedEntry.name.startsWith('.')) {
           continue;
         }
@@ -155,53 +258,113 @@ function listPackageDirectories(nodeModulesPath: string): string[] {
   return directories;
 }
 
+/** Resolves the real path of a package, so that a symlink is only followed once. */
+function realPathOf(packagePath: string): Outcome<string> {
+  try {
+    return found(fs.realpathSync(packagePath));
+  } catch (error) {
+    return failed({
+      kind: 'unreadable-package',
+      message: `Cannot resolve the real path of the installed package ${packagePath}`,
+      path: packagePath,
+      code: errorCode(error),
+      hint: 'the package was left unchecked; a broken symlink usually causes this, reinstall with "npm ci"',
+    });
+  }
+}
+
 /**
  * Resolves a dependency name from a starting directory the way Node does: the nearest
  * `node_modules` wins, then each parent directory is tried in turn.
+ *
+ * `fs.existsSync` is deliberately not used, because it answers `false` both for a path that
+ * is not there and for one that cannot be read.
  */
 function resolveDependency(
   fromPath: string,
   dependencyName: string,
   rootPath: string
-): string | undefined {
+): { outcome: Outcome<string>; searched: string[] } {
+  const searched: string[] = [];
   let current = fromPath;
+
   for (;;) {
     const candidate = path.join(current, 'node_modules', dependencyName);
-    if (fs.existsSync(path.join(candidate, 'package.json'))) {
-      return candidate;
+    searched.push(candidate);
+
+    try {
+      const stats = fs.statSync(path.join(candidate, 'package.json'), {
+        throwIfNoEntry: false,
+      });
+      if (stats !== undefined && stats.isFile()) {
+        return { outcome: found(candidate), searched };
+      }
+    } catch (error) {
+      return {
+        outcome: failed({
+          kind: 'unreadable-directory',
+          message: `Cannot look for the dependency "${dependencyName}" in ${candidate}`,
+          path: candidate,
+          dependency: dependencyName,
+          code: errorCode(error),
+          hint: 'check that the path is readable; the dependency could not be checked',
+        }),
+        searched,
+      };
     }
+
     const parent = path.dirname(current);
     if (parent === current || !current.startsWith(rootPath)) {
-      return undefined;
+      return { outcome: missing(), searched };
     }
     current = parent;
   }
 }
 
-function productionDependencyNames(
+/** A dependency of a package, and whether the package cannot work without it. */
+interface DeclaredDependency {
+  name: string;
+  /**
+   * A mandatory dependency is part of what the project ships and must be checked. Optional
+   * dependencies and peer dependencies may legitimately not be installed - a platform
+   * specific binary for another operating system, or a peer the application provides itself -
+   * and are then simply not part of the tree.
+   */
+  mandatory: boolean;
+}
+
+function productionDependencies(
   manifest: PackageManifest,
   isRoot: boolean
-): string[] {
-  const names = new Set<string>(Object.keys(manifest.dependencies ?? {}));
-  for (const name of Object.keys(manifest.optionalDependencies ?? {})) {
-    names.add(name);
+): DeclaredDependency[] {
+  const optional = new Set(Object.keys(manifest.optionalDependencies ?? {}));
+  const declared = new Map<string, DeclaredDependency>();
+
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    declared.set(name, { name, mandatory: !optional.has(name) });
+  }
+  for (const name of optional) {
+    declared.set(name, { name, mandatory: false });
   }
   if (!isRoot) {
-    // A dependency's peer dependencies are part of the shipped product as well, as long as
-    // they are actually installed. Optional peers are skipped.
     for (const name of Object.keys(manifest.peerDependencies ?? {})) {
-      if (manifest.peerDependenciesMeta?.[name]?.optional !== true) {
-        names.add(name);
+      if (
+        manifest.peerDependenciesMeta?.[name]?.optional !== true &&
+        !declared.has(name)
+      ) {
+        declared.set(name, { name, mandatory: false });
       }
     }
   }
-  return [...names];
+
+  return [...declared.values()];
 }
 
 /** Walks the production dependency graph of the project. */
 function scanProduction(
   start: string,
-  rootManifest: PackageManifest
+  rootManifest: PackageManifest,
+  diagnostics: ScanDiagnostics
 ): ScannedPackage[] {
   const found = new Map<string, ScannedPackage>();
   const visited = new Set<string>();
@@ -217,41 +380,89 @@ function scanProduction(
       break;
     }
 
-    let realPath: string;
-    try {
-      realPath = fs.realpathSync(current.packagePath);
-    } catch {
-      realPath = current.packagePath;
-    }
-    if (visited.has(realPath)) {
+    const realPath = realPathOf(current.packagePath);
+    if (realPath.status !== 'found') {
+      if (realPath.status === 'failed') {
+        diagnostics.record(realPath.error);
+      }
       continue;
     }
-    visited.add(realPath);
+    if (visited.has(realPath.value)) {
+      continue;
+    }
+    visited.add(realPath.value);
 
     const scanned = toScannedPackage(
       current.manifest,
       current.packagePath,
-      path.basename(current.packagePath),
-      current.isRoot
+      current.isRoot,
+      diagnostics
     );
     found.set(scanned.key, scanned);
 
-    for (const dependencyName of productionDependencyNames(
+    for (const dependency of productionDependencies(
       current.manifest,
       current.isRoot
     )) {
-      const dependencyPath = resolveDependency(
+      const { outcome, searched } = resolveDependency(
         current.packagePath,
-        dependencyName,
+        dependency.name,
         start
       );
-      if (dependencyPath === undefined) {
+
+      if (outcome.status === 'failed') {
+        diagnostics.record({
+          ...outcome.error,
+          requiredBy: scanned.key,
+          requiredByPath: current.packagePath,
+        });
         continue;
       }
-      const manifest = readManifest(dependencyPath);
-      if (manifest !== undefined) {
-        queue.push({ packagePath: dependencyPath, manifest, isRoot: false });
+
+      if (outcome.status === 'missing') {
+        if (dependency.mandatory) {
+          diagnostics.record({
+            kind: 'unresolved-dependency',
+            message: `Cannot find the dependency "${dependency.name}" required by ${scanned.key}`,
+            path: current.packagePath,
+            dependency: dependency.name,
+            requiredBy: scanned.key,
+            requiredByPath: current.packagePath,
+            searched,
+            hint: `"${dependency.name}" is a mandatory dependency, so it is part of what the project ships and its license must be checked; ${INSTALL_HINT}`,
+          });
+        }
+        continue;
       }
+
+      const manifest = readManifest(outcome.value);
+      if (manifest.status === 'failed') {
+        diagnostics.record({
+          ...manifest.error,
+          dependency: dependency.name,
+          requiredBy: scanned.key,
+          requiredByPath: current.packagePath,
+        });
+        continue;
+      }
+      if (manifest.status === 'missing') {
+        diagnostics.record({
+          kind: 'unreadable-manifest',
+          message: `The installed dependency "${dependency.name}" required by ${scanned.key} has no package.json`,
+          path: outcome.value,
+          dependency: dependency.name,
+          requiredBy: scanned.key,
+          requiredByPath: current.packagePath,
+          hint: `the directory ${outcome.value} exists but does not contain a package.json, so the package could not be identified; ${INSTALL_HINT}`,
+        });
+        continue;
+      }
+
+      queue.push({
+        packagePath: outcome.value,
+        manifest: manifest.value,
+        isRoot: false,
+      });
     }
   }
 
@@ -261,18 +472,14 @@ function scanProduction(
 /** Walks every package installed below `node_modules`, including nested ones. */
 function scanEverything(
   start: string,
-  rootManifest: PackageManifest
+  rootManifest: PackageManifest,
+  diagnostics: ScanDiagnostics
 ): ScannedPackage[] {
-  const found = new Map<string, ScannedPackage>();
+  const collected = new Map<string, ScannedPackage>();
   const visited = new Set<string>();
 
-  const rootPackage = toScannedPackage(
-    rootManifest,
-    start,
-    path.basename(start),
-    true
-  );
-  found.set(rootPackage.key, rootPackage);
+  const rootPackage = toScannedPackage(rootManifest, start, true, diagnostics);
+  collected.set(rootPackage.key, rootPackage);
 
   const queue: string[] = [path.join(start, 'node_modules')];
   while (queue.length > 0) {
@@ -281,55 +488,124 @@ function scanEverything(
       break;
     }
 
-    for (const packagePath of listPackageDirectories(nodeModulesPath)) {
-      let realPath: string;
-      try {
-        realPath = fs.realpathSync(packagePath);
-      } catch {
+    for (const packagePath of listPackageDirectories(
+      nodeModulesPath,
+      diagnostics
+    )) {
+      const realPath = realPathOf(packagePath);
+      if (realPath.status !== 'found') {
+        if (realPath.status === 'failed') {
+          diagnostics.record(realPath.error);
+        }
         continue;
       }
-      if (visited.has(realPath)) {
+      if (visited.has(realPath.value)) {
         continue;
       }
-      visited.add(realPath);
+      visited.add(realPath.value);
 
       const manifest = readManifest(packagePath);
-      if (manifest === undefined) {
+      if (manifest.status === 'failed') {
+        diagnostics.record(manifest.error);
+        continue;
+      }
+      if (manifest.status === 'missing') {
+        diagnostics.record({
+          kind: 'unreadable-manifest',
+          message: `The installed package directory ${packagePath} has no package.json`,
+          path: packagePath,
+          hint: `the directory exists below node_modules but does not contain a package.json, so it could not be identified; ${INSTALL_HINT}`,
+        });
         continue;
       }
 
       const scanned = toScannedPackage(
-        manifest,
+        manifest.value,
         packagePath,
-        path.basename(packagePath),
-        false
+        false,
+        diagnostics
       );
-      if (!found.has(scanned.key)) {
-        found.set(scanned.key, scanned);
+      if (!collected.has(scanned.key)) {
+        collected.set(scanned.key, scanned);
       }
 
       queue.push(path.join(packagePath, 'node_modules'));
     }
   }
 
-  return [...found.values()];
+  return [...collected.values()];
+}
+
+/**
+ * Reports the common case of a project whose dependencies were never installed as one clear
+ * error, instead of one unresolved dependency after another.
+ */
+function dependenciesInstalled(
+  start: string,
+  rootManifest: PackageManifest,
+  diagnostics: ScanDiagnostics
+): boolean {
+  const declaredCount =
+    Object.keys(rootManifest.dependencies ?? {}).length +
+    Object.keys(rootManifest.devDependencies ?? {}).length +
+    Object.keys(rootManifest.optionalDependencies ?? {}).length;
+  if (declaredCount === 0) {
+    return true;
+  }
+
+  const nodeModulesPath = path.join(start, 'node_modules');
+  let stats: fs.Stats | undefined;
+  try {
+    stats = fs.statSync(nodeModulesPath, { throwIfNoEntry: false });
+  } catch (error) {
+    diagnostics.record({
+      kind: 'unreadable-directory',
+      message: `Cannot read the node_modules directory ${nodeModulesPath}`,
+      path: nodeModulesPath,
+      code: errorCode(error),
+      hint: 'no dependency could be checked; check that the path is a readable directory',
+    });
+    return false;
+  }
+
+  if (stats === undefined) {
+    diagnostics.record({
+      kind: 'dependencies-not-installed',
+      message: `The dependencies of ${rootManifest.name} are not installed: ${nodeModulesPath} does not exist`,
+      path: nodeModulesPath,
+      hint: `${declaredCount} dependencies are declared but none is installed, so nothing could be checked; ${INSTALL_HINT}`,
+    });
+    return false;
+  }
+
+  return true;
 }
 
 /** Scans the installed packages of a project. */
-export function scanPackages(options: ScanOptions): ScannedPackage[] {
+export function scanPackages(options: ScanOptions): ScanResult {
   const start = path.resolve(options.start);
+  const diagnostics = new ScanDiagnostics();
+
   const rootManifest = readManifest(start);
-  if (rootManifest === undefined) {
-    throw new Error(`No readable package.json found in ${start}`);
+  if (rootManifest.status === 'missing') {
+    throw new Error(`No package.json found in ${start}`);
+  }
+  if (rootManifest.status === 'failed') {
+    throw new Error(rootManifest.error.message);
   }
 
-  const packages = options.production
-    ? scanProduction(start, rootManifest)
-    : scanEverything(start, rootManifest);
+  const packages = dependenciesInstalled(start, rootManifest.value, diagnostics)
+    ? options.production
+      ? scanProduction(start, rootManifest.value, diagnostics)
+      : scanEverything(start, rootManifest.value, diagnostics)
+    : [toScannedPackage(rootManifest.value, start, true, diagnostics)];
 
   const filtered = options.excludePrivatePackages
     ? packages.filter(scanned => !scanned.private)
     : packages;
 
-  return filtered.sort((left, right) => left.key.localeCompare(right.key));
+  return {
+    packages: filtered.sort((left, right) => left.key.localeCompare(right.key)),
+    errors: [...diagnostics.errors],
+  };
 }

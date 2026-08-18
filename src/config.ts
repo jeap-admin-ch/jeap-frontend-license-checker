@@ -12,6 +12,7 @@ import {
   JEAP_DENIED_LICENSES,
   JEAP_RECOMMENDED_LICENSES,
 } from './default-policy';
+import { NOTICE_FIELDS } from './notices';
 import type {
   LicenseException,
   LicenseTextsMode,
@@ -160,6 +161,24 @@ function resolveTextsMode(
   return mode;
 }
 
+/**
+ * A field name that is not known would silently produce no line at all, so a typo in the
+ * configuration is refused rather than quietly dropping information from the notice file.
+ */
+function resolveFields(fields: string[] | undefined): string[] {
+  if (fields === undefined) {
+    return DEFAULT_NOTICE_FIELDS;
+  }
+  for (const field of fields) {
+    if (!NOTICE_FIELDS.includes(field)) {
+      throw new Error(
+        `Unknown notice field "${field}", expected one of ${NOTICE_FIELDS.join(', ')}`
+      );
+    }
+  }
+  return fields;
+}
+
 function resolveNotices(
   config: FileConfig,
   overrides: ConfigOverrides
@@ -167,7 +186,7 @@ function resolveNotices(
   const notices = config.notices ?? {};
   return {
     out: overrides.noticesOut ?? notices.out,
-    fields: notices.fields ?? DEFAULT_NOTICE_FIELDS,
+    fields: resolveFields(notices.fields),
     // The notice specific setting is the most specific one and wins; below it the command
     // line flag beats the project wide setting from the configuration file.
     production:

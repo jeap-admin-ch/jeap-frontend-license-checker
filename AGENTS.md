@@ -43,6 +43,8 @@ docs/
 
 src/
   cli.ts                                  Argument parsing, command dispatch, exit codes
+  diagnostics.ts                          Scan errors and the collector that gathers them
+  outcome.ts                              found / missing / failed, so failures are not skipped
   index.ts                                Public programmatic API
   check.ts                                The policy check: scan, judge, collect
   config.ts                               Configuration discovery, parsing and resolution
@@ -96,6 +98,13 @@ runs `npm run format:check` followed by `npm run lint` and fails the build on an
   package that ships none is marked, not invented for.
 - The committed notice file must stay quiet. It carries no versions and no absolute paths, so
   it changes only when a dependency or a license changes, not on every update.
+- **Never let a failure look like an absence.** `ENOENT` means "not there", which is an
+  answer; every other error means the answer is unknown and has to be recorded as a scan
+  error. Helpers return `Outcome<T>` (`found` / `missing` / `failed`) rather than
+  `T | undefined`, so a caller cannot skip something that was never examined. Do not
+  reintroduce `undefined` for both cases, and do not use `fs.existsSync`, which answers
+  `false` for an unreadable path as well.
+- A scan error fails the run, exit code `3`. `notices` writes nothing in that state.
 - Never let a package pass silently. A package that is not covered by the policy is either an
   explicit exception with a reason, or a problem.
 - A dual licensed package is accepted through a permissive alternative, but must stay visible in

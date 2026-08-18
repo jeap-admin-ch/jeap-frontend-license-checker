@@ -44,6 +44,7 @@ Options:
   --production              Only consider production dependencies
   --exclude-private         Skip packages marked as private
   --allow-unused-exceptions Do not fail on configured exceptions that are no longer needed
+  --allow-incomplete-scan   Report what could not be scanned, but do not fail on it
   --out <file>              Write the output to a file instead of stdout (notices)
   --json                    Print the check result as JSON
   --quiet                   Print nothing on success
@@ -54,7 +55,12 @@ Exit codes:
   0  the check passed
   1  the license policy was violated
   2  the invocation or the configuration is wrong
+  3  the dependency tree could not be scanned completely
 ```
+
+The check only reports success when it examined everything. A dependency that could not be
+resolved or read makes the scan incomplete and fails the run, because a package nobody looked
+at must not be able to pass. See [docs/policy.md](docs/policy.md#incomplete-scans).
 
 ## Configuration
 

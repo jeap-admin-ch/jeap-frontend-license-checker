@@ -2,6 +2,7 @@
  * Rendering of a check result, as readable text or as JSON for further processing.
  */
 import { displayLicense } from './check';
+import type { ScanError } from './diagnostics';
 import type { CheckResult, CheckedPackage } from './types';
 
 const ANSI = {
@@ -37,6 +38,62 @@ function origin(item: CheckedPackage): string {
 
 function byKey(left: CheckedPackage, right: CheckedPackage): number {
   return left.package.key.localeCompare(right.package.key);
+}
+
+/**
+ * Renders one thing the scan could not examine, with everything needed to find and fix it:
+ * the path, the errno, who required it, where it was looked for, and what to do.
+ */
+function renderScanError(error: ScanError): string[] {
+  const lines = [`  ${error.message}`];
+  const detail = (label: string, value: string): void => {
+    lines.push(`    ${`${label}:`.padEnd(14)}${value}`);
+  };
+
+  detail('Kind', error.kind);
+  detail('Path', error.path);
+  if (error.code !== undefined) {
+    detail('System error', error.code);
+  }
+  if (error.dependency !== undefined) {
+    detail('Dependency', error.dependency);
+  }
+  if (error.requiredBy !== undefined) {
+    detail(
+      'Required by',
+      error.requiredByPath !== undefined
+        ? `${error.requiredBy} (${error.requiredByPath})`
+        : error.requiredBy
+    );
+  }
+  if (error.searched !== undefined && error.searched.length > 0) {
+    detail('Looked in', error.searched[0] as string);
+    for (const location of error.searched.slice(1)) {
+      lines.push(`    ${' '.repeat(14)}${location}`);
+    }
+  }
+  if (error.hint !== undefined) {
+    detail('What to do', error.hint);
+  }
+  lines.push('');
+  return lines;
+}
+
+/** Renders everything a scan could not examine, for a report or for stderr. */
+export function renderScanErrors(errors: readonly ScanError[]): string {
+  const lines = ['The dependency tree could not be scanned completely:'];
+  for (const error of errors) {
+    for (const line of renderScanError(error)) {
+      lines.push(paint('red', line));
+    }
+  }
+  lines.push(
+    paint(
+      'red',
+      'Packages that could not be examined may carry any license, so this result is incomplete.'
+    )
+  );
+  return lines.join('\n');
 }
 
 /** Renders the check result as human readable text. */
@@ -147,6 +204,11 @@ export function renderText(result: CheckResult): string {
     }
   }
 
+  if (result.scanErrors.length > 0) {
+    lines.push('');
+    lines.push(renderScanErrors(result.scanErrors));
+  }
+
   const allowed = result.packages.filter(
     item => item.verdict.kind === 'allowed'
   ).length;
@@ -157,6 +219,9 @@ export function renderText(result: CheckResult): string {
       : undefined,
     paint('blue', `Exceptions (${exceptions.length})`),
     paint('red', `Problems (${problems.length})`),
+    result.scanErrors.length > 0
+      ? paint('red', `Scan errors (${result.scanErrors.length})`)
+      : undefined,
   ]
     .filter((part): part is string => part !== undefined)
     .join(' ');
@@ -177,6 +242,7 @@ export function renderJson(result: CheckResult): string {
     {
       ok: result.ok,
       licenseCounts: result.licenseCounts,
+      scanErrors: result.scanErrors,
       unusedExceptions: result.unusedExceptionKeys,
       packages: result.packages.map(item => ({
         key: item.package.key,

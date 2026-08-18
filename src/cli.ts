@@ -11,8 +11,8 @@ import * as path from 'node:path';
 import { check } from './check';
 import { resolveConfig, type ConfigOverrides } from './config';
 import { renderNotices } from './notices';
-import { renderJson, renderText } from './report';
-import type { LicenseTextsMode } from './types';
+import { renderJson, renderScanErrors, renderText } from './report';
+import type { CheckResult, LicenseTextsMode } from './types';
 
 const USAGE = `Usage: jeap-frontend-license-checker [command] [options]
 
@@ -26,6 +26,8 @@ Options:
   --production              Only consider production dependencies
   --exclude-private         Skip packages marked as private
   --allow-unused-exceptions Do not fail on configured exceptions that are no longer needed
+  --allow-incomplete-scan   Report what could not be scanned, but do not fail on it. For
+                            local debugging of a half-installed tree; never in a pipeline
   --out <file>              Write the output to a file instead of stdout (notices)
   --texts <mode>            License texts of the redistributed dependencies (notices):
                             folder (default), inline or none
@@ -42,6 +44,7 @@ Exit codes:
   0  the check passed
   1  the license policy was violated
   2  the invocation or the configuration is wrong
+  3  the dependency tree could not be scanned completely
 `;
 
 interface ParsedArguments {
@@ -49,6 +52,7 @@ interface ParsedArguments {
   overrides: ConfigOverrides;
   json: boolean;
   quiet: boolean;
+  allowIncompleteScan: boolean;
 }
 
 class UsageError extends Error {}
@@ -66,6 +70,7 @@ function parseArguments(argv: string[]): ParsedArguments {
     overrides: {},
     json: false,
     quiet: false,
+    allowIncompleteScan: false,
   };
 
   let index = 0;
@@ -122,6 +127,9 @@ function parseArguments(argv: string[]): ParsedArguments {
       case '--allow-unused-exceptions':
         parsed.overrides.failOnUnusedExceptions = false;
         break;
+      case '--allow-incomplete-scan':
+        parsed.allowIncompleteScan = true;
+        break;
       case '--json':
         parsed.json = true;
         break;
@@ -151,14 +159,23 @@ function readVersion(): string {
 function runCheck(parsed: ParsedArguments): number {
   const config = resolveConfig(parsed.overrides);
   const result = check(config);
+  const incomplete = result.scanErrors.length > 0;
+  const passed =
+    result.ok ||
+    (incomplete && parsed.allowIncompleteScan && !hasPolicyFailure(result));
 
   if (parsed.json) {
     process.stdout.write(`${renderJson(result)}\n`);
-  } else if (!result.ok || !parsed.quiet) {
+  } else if (!passed || incomplete || !parsed.quiet) {
     process.stdout.write(`${renderText(result)}\n`);
   }
 
-  return result.ok ? 0 : 1;
+  if (passed) {
+    return 0;
+  }
+  // An incomplete scan is reported apart from a policy violation: a tree that could not be
+  // read and a dependency with a forbidden license call for entirely different responses.
+  return hasPolicyFailure(result) ? 1 : 3;
 }
 
 /**
@@ -185,9 +202,29 @@ function resolveTextsDirectory(
   return resolved;
 }
 
+/** True when the packages that were examined violate the policy. */
+function hasPolicyFailure(result: CheckResult): boolean {
+  const hasProblems = result.packages.some(
+    item => item.verdict.kind === 'problem'
+  );
+  const hasUnusedExceptions =
+    result.config.failOnUnusedExceptions &&
+    result.unusedExceptionKeys.length > 0;
+  return hasProblems || hasUnusedExceptions;
+}
+
 function runNotices(parsed: ParsedArguments): number {
   const config = resolveConfig(parsed.overrides);
   const output = renderNotices(config);
+
+  // A notice file built from a partial scan is a compliance record that claims to list every
+  // dependency while some were never seen, so nothing is written.
+  if (output.scanErrors.length > 0 && !parsed.allowIncompleteScan) {
+    process.stderr.write(
+      `${renderScanErrors(output.scanErrors)}\nNo third-party notices were written, because the dependency tree could not be scanned completely.\nPass --allow-incomplete-scan to write them anyway.\n`
+    );
+    return 3;
+  }
 
   if (config.notices.out === undefined) {
     if (output.files.length > 0) {
