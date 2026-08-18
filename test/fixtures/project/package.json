@@ -11,7 +11,8 @@
     "license-file-only": "1.0.0",
     "legacy-array": "1.0.0",
     "no-metadata": "1.0.0",
-    "nested-host": "1.0.0"
+    "nested-host": "1.0.0",
+    "public-domain-claim": "0.0.1"
   },
   "devDependencies": {
     "dev-only": "1.0.0"

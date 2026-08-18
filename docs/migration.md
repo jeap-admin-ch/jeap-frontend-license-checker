@@ -42,6 +42,10 @@ license, so a new transitive dependency with an already approved license breaks 
    In the jEAP frontends this reduced 20 to 33 exceptions per project to the handful of packages
    that genuinely publish no license metadata.
 
+   A package declaring a free-form value instead of an SPDX identifier, such as
+   `"license": "Public Domain"`, also needs an exception. The policy accepts SPDX identifiers
+   only, because what such a claim grants has to be established per package.
+
 4. Prefer a scope wildcard where several packages of the same publisher are affected:
 
    ```json

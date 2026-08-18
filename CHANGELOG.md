@@ -14,7 +14,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   notice file for them.
 - The accepted permissive licenses ship with the tool, so a project without configuration is
   already checked against the jEAP policy and only has to declare its own exceptions. Projects
-  can widen the policy with `allowLicenses` and tighten it with `denyLicenses`.
+  can widen the policy with `allowLicenses` and tighten it with `denyLicenses`. The policy
+  accepts SPDX identifiers only; a package declaring a free-form value such as `Public Domain`
+  needs an exception naming that package.
 - Exception keys support version wildcards for scoped packages (`@scope/package@*`) and scope
   wildcards (`@scope/*`), so a dependency update of an exempted package does not break the build.
 - SPDX license expressions are evaluated, including `AND`, `OR`, `WITH`, the `+` suffix and

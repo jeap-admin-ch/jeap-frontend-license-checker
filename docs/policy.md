@@ -42,8 +42,22 @@ automatic choice, so documenting the decision does not turn the entry into an un
 
 `0BSD`, `AFL-2.1`, `Apache-2.0`, `Artistic-2.0`, `BlueOak-1.0.0`, `BSD-2-Clause`,
 `BSD-3-Clause`, `BSD-4-Clause`, `CC-BY-3.0`, `CC-BY-4.0`, `CC0-1.0`, `ISC`, `MIT`, `MIT-0`,
-`MPL-2.0`, `PostgreSQL`, `Public Domain`, `Python-2.0`, `Unlicense`, `UPL-1.0`, `W3C`, `WTFPL`,
-`Zlib`
+`MPL-2.0`, `PostgreSQL`, `Python-2.0`, `Unlicense`, `UPL-1.0`, `W3C`, `WTFPL`, `Zlib`
+
+Only SPDX identifiers are accepted. Free-form values such as `Public Domain` are deliberately
+not in the policy: they are a claim, not a license text, and what they actually grant has to be
+established per package. A package declaring one needs an exception naming the package, with a
+reason recording where the claim was verified:
+
+```json
+{
+  "exceptions": {
+    "jsonify@*": {
+      "reason": "Public domain dedication by the author, see the repository at https://github.com/ljharb/jsonify."
+    }
+  }
+}
+```
 
 ## Denied licenses
 
