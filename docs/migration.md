@@ -60,8 +60,10 @@ license, so a new transitive dependency with an already approved license breaks 
 
 ## What changes in the output
 
-- The project itself is no longer reported as `UNLICENSED`; its declared license is read from
-  its own `package.json`.
+- The project itself is no longer reported as `UNLICENSED` when it declares a license: the
+  `license` field of its own `package.json` is read like any other package's. A project that
+  declares none is still reported as `UNKNOWN` - add the field rather than exempting the
+  project from its own check.
 - Licenses guessed from a license file are reported under their real identifier instead of the
   old `MIT*` / `BSD*` spelling, and the report says that they were detected from a file.
 - A package whose license is only known by a URL is reported as `UNKNOWN` rather than as

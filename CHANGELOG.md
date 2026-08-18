@@ -47,4 +47,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   violation, `notices` writes nothing from a partial scan, and `--allow-incomplete-scan`
   downgrades it for local debugging.
 - An unknown entry in `notices.fields` is refused instead of silently producing no line.
+- The license texts are written only inside the texts directory: a package name is sanitised
+  and the resulting path is verified, so a package cannot write over a file of the project. A
+  package installed in more than one version gets one directory per version. The directory is
+  only rebuilt when this tool created it, which it records with a `.jeap-license-texts` marker.
+- Unreadable license files are reported when the notices are generated, instead of the package
+  being recorded as shipping no license text.
+- Configuration values are validated: a license list that is not an array, an unknown `extends`
+  and a flag that is not a boolean are refused rather than silently ignored, and a
+  configuration file that exists but cannot be read fails the run instead of leaving the
+  project with the plain built-in policy.
+- A dependency is never resolved from outside the project directory.
 - No runtime dependencies.

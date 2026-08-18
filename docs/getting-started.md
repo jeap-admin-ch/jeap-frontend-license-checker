@@ -43,8 +43,12 @@ In a Maven build the scripts are usually run by the `exec-maven-plugin` in the
 npm run check-licenses
 ```
 
-The first run usually passes without any configuration. What remains are the packages that
-publish no usable license metadata at all:
+The first run usually passes without any configuration, as long as the project declares its
+own license. The project itself is checked like any other package, so a `package.json` without
+a `license` field is reported as `UNKNOWN`; add `"license": "Apache-2.0"` to it rather than
+exempting the project from its own check.
+
+What remains are the packages that publish no usable license metadata at all:
 
 ```text
 Problems with the licenses of these dependencies:

@@ -74,6 +74,21 @@ function judge(
   return { kind: 'problem', cause: denied ? 'denied' : 'not-allowed' };
 }
 
+/**
+ * True when the packages that were examined violate the policy, as opposed to the scan not
+ * having examined everything. The two are reported and exited differently, so the rule lives
+ * here rather than being restated by each caller.
+ */
+export function hasPolicyFailure(result: CheckResult): boolean {
+  const hasProblems = result.packages.some(
+    item => item.verdict.kind === 'problem'
+  );
+  const hasUnusedExceptions =
+    result.config.failOnUnusedExceptions &&
+    result.unusedExceptionKeys.length > 0;
+  return hasProblems || hasUnusedExceptions;
+}
+
 /** Runs the license policy check for a project. */
 export function check(config: ResolvedConfig): CheckResult {
   const scan = scanPackages({
@@ -104,18 +119,17 @@ export function check(config: ResolvedConfig): CheckResult {
     .filter(key => !usedExceptionKeys.has(key))
     .sort();
 
-  const hasProblems = packages.some(item => item.verdict.kind === 'problem');
-  const hasUnusedExceptions =
-    config.failOnUnusedExceptions && unusedExceptionKeys.length > 0;
-
-  // A package that was never examined must not be able to make the run pass, so an
-  // incomplete scan fails regardless of what the packages that were examined say.
-  return {
+  const result: CheckResult = {
     config,
     packages,
     scanErrors: scan.errors,
     licenseCounts,
     unusedExceptionKeys,
-    ok: !hasProblems && !hasUnusedExceptions && scan.errors.length === 0,
+    ok: false,
   };
+
+  // A package that was never examined must not be able to make the run pass, so an
+  // incomplete scan fails regardless of what the packages that were examined say.
+  result.ok = !hasPolicyFailure(result) && scan.errors.length === 0;
+  return result;
 }

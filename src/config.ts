@@ -86,6 +86,21 @@ function asFileConfig(value: unknown, source: string): FileConfig {
 }
 
 /** Locates and reads the configuration, returning the defaults when there is none. */
+/**
+ * Tells a configuration file that is not there apart from one that cannot be read.
+ * `fs.existsSync` answers `false` for both, which would let an unreadable configuration
+ * silently drop the project's whole policy.
+ */
+function configFileExists(filePath: string): boolean {
+  try {
+    return fs.statSync(filePath, { throwIfNoEntry: false }) !== undefined;
+  } catch (error) {
+    throw new Error(
+      `Cannot read ${filePath}: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`
+    );
+  }
+}
+
 function loadFileConfig(
   start: string,
   explicitPath: string | undefined
@@ -99,7 +114,7 @@ function loadFileConfig(
   }
 
   const configFilePath = path.join(start, CONFIG_FILE_NAME);
-  if (fs.existsSync(configFilePath)) {
+  if (configFileExists(configFilePath)) {
     return {
       config: asFileConfig(parseJsonFile(configFilePath), configFilePath),
       configPath: configFilePath,
@@ -107,7 +122,7 @@ function loadFileConfig(
   }
 
   const packageJsonPath = path.join(start, 'package.json');
-  if (fs.existsSync(packageJsonPath)) {
+  if (configFileExists(packageJsonPath)) {
     const manifest = parseJsonFile(packageJsonPath) as Record<string, unknown>;
     const embedded = manifest[PACKAGE_JSON_CONFIG_KEY];
     if (embedded !== undefined) {
@@ -122,6 +137,47 @@ function loadFileConfig(
   }
 
   return { config: {}, configPath: undefined };
+}
+
+/** A setting that is not the shape it has to be is refused, never quietly ignored. */
+function requireStringArray(
+  value: unknown,
+  setting: string
+): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    !Array.isArray(value) ||
+    value.some(entry => typeof entry !== 'string' || entry.trim() === '')
+  ) {
+    throw new Error(
+      `The setting "${setting}" must be an array of license identifiers, for example ["MIT", "Apache-2.0"]`
+    );
+  }
+  return value as string[];
+}
+
+function requireBoolean(value: unknown, setting: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'boolean') {
+    throw new Error(`The setting "${setting}" must be true or false`);
+  }
+  return value;
+}
+
+function requireExtends(value: unknown): 'jeap:recommended' | null {
+  if (value === undefined || value === 'jeap:recommended') {
+    return 'jeap:recommended';
+  }
+  if (value === null) {
+    return null;
+  }
+  throw new Error(
+    `The setting "extends" must be "jeap:recommended" or null, but was ${JSON.stringify(value)}`
+  );
 }
 
 /** Normalises exceptions, accepting a plain string as a shorthand for the reason. */
@@ -209,23 +265,41 @@ export function resolveConfig(overrides: ConfigOverrides = {}): ResolvedConfig {
   const start = path.resolve(overrides.start ?? process.cwd());
   const { config, configPath } = loadFileConfig(start, overrides.configPath);
 
-  const base = config.extends === null ? [] : [...JEAP_RECOMMENDED_LICENSES];
-  const baseDenied = config.extends === null ? [] : [...JEAP_DENIED_LICENSES];
+  const extended = requireExtends(config.extends);
+  const base = extended === null ? [] : [...JEAP_RECOMMENDED_LICENSES];
+  const baseDenied = extended === null ? [] : [...JEAP_DENIED_LICENSES];
 
   return {
     start,
     configPath,
-    allowLicenses: [...new Set([...base, ...(config.allowLicenses ?? [])])],
-    denyLicenses: [...new Set([...baseDenied, ...(config.denyLicenses ?? [])])],
+    allowLicenses: [
+      ...new Set([
+        ...base,
+        ...(requireStringArray(config.allowLicenses, 'allowLicenses') ?? []),
+      ]),
+    ],
+    denyLicenses: [
+      ...new Set([
+        ...baseDenied,
+        ...(requireStringArray(config.denyLicenses, 'denyLicenses') ?? []),
+      ]),
+    ],
     exceptions: normalizeExceptions(config.exceptions),
-    production: overrides.production ?? config.production ?? false,
+    production:
+      overrides.production ??
+      requireBoolean(config.production, 'production') ??
+      false,
     excludePrivatePackages:
       overrides.excludePrivatePackages ??
-      config.excludePrivatePackages ??
+      requireBoolean(config.excludePrivatePackages, 'excludePrivatePackages') ??
       false,
     failOnUnusedExceptions:
-      overrides.failOnUnusedExceptions ?? config.failOnUnusedExceptions ?? true,
-    allowDualLicenseChoice: config.allowDualLicenseChoice ?? true,
+      overrides.failOnUnusedExceptions ??
+      requireBoolean(config.failOnUnusedExceptions, 'failOnUnusedExceptions') ??
+      true,
+    allowDualLicenseChoice:
+      requireBoolean(config.allowDualLicenseChoice, 'allowDualLicenseChoice') ??
+      true,
     notices: resolveNotices(config, overrides),
   };
 }

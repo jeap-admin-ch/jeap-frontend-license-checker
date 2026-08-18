@@ -103,7 +103,8 @@ const NON_TEXT_EXTENSIONS = [
   '.yaml',
 ];
 
-const MAX_LICENSE_FILE_SIZE = 512 * 1024;
+/** License texts are prose; anything much larger is not one and is not read into memory. */
+export const MAX_LICENSE_FILE_SIZE = 512 * 1024;
 
 const LICENSE_FILE_PATTERN = /^(licen[cs]e|copying)/i;
 const NOTICE_FILE_PATTERN = /^notice/i;

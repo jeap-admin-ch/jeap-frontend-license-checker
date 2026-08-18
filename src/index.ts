@@ -1,7 +1,12 @@
 /**
  * Public API of the jEAP frontend license checker.
  */
-export { check, displayLicense, UNKNOWN_LICENSE } from './check';
+export {
+  check,
+  displayLicense,
+  hasPolicyFailure,
+  UNKNOWN_LICENSE,
+} from './check';
 export { errorCode, isMissing, ScanDiagnostics } from './diagnostics';
 export type { ScanError, ScanErrorKind } from './diagnostics';
 export { failed, found, missing } from './outcome';
@@ -19,6 +24,7 @@ export {
 export {
   detectLicense,
   findLicenseDocuments,
+  MAX_LICENSE_FILE_SIZE,
   licenseFromLicenseFile,
   licenseFromManifest,
 } from './license-detection';
@@ -27,6 +33,7 @@ export { findMatchingExceptionKey, splitPackageKey } from './match';
 export { NOTICE_FIELDS, renderNotices } from './notices';
 export type { NoticeFile, NoticeOutput } from './notices';
 export { renderJson, renderScanErrors, renderText } from './report';
+export type { RenderOptions } from './report';
 export { scanPackages } from './scan';
 export type { ScanOptions, ScanResult } from './scan';
 export { collectIdentifiers, evaluateExpression } from './spdx';
