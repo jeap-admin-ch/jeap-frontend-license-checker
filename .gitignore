@@ -1,0 +1,27 @@
+# Compiled output
+/dist
+/.test-build
+/tmp
+/out-tsc
+
+# Node
+/node_modules
+npm-debug.log
+*.tgz
+
+# IDEs and editors
+.idea/
+.project
+.classpath
+.settings/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.history/*
+
+# Miscellaneous
+/coverage
+
+# System files
+.DS_Store
+Thumbs.db

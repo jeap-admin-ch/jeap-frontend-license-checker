@@ -1,0 +1,7 @@
+dist
+node_modules
+.test-build
+coverage
+test/fixtures
+CHANGELOG.md
+THIRD-PARTY-LICENSES.md
