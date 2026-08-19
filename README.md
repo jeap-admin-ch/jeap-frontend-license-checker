@@ -50,7 +50,8 @@ Exit codes:
 
 The check only reports success when it examined everything. A dependency that could not be
 resolved or read makes the scan incomplete and fails the run, because a package nobody looked
-at must not be able to pass. See [docs/policy.md](docs/policy.md#incomplete-scans).
+at must not be able to pass. See the "Incomplete scans" section of
+[docs/policy.md](docs/policy.md).
 
 ## Configuration
 

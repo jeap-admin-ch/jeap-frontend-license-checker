@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-08-19
+
+### Fixed
+
+- The README linked into `docs/policy.md` with an anchor. The jEAP documentation site
+  copies a repository's `docs/` files up beside the README-derived landing page and
+  rewrites `docs/<file>.md` links accordingly, but its rewrite does not match a link
+  carrying a `#fragment`, so that one link survived unrewritten and broke the site build.
+  The link now points at the page and names the section in the text.
+
 ## [1.0.1] - 2026-08-18
 
 ### Changed
